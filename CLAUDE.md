@@ -1,20 +1,20 @@
 # Upbeater 作業規約
 
-設計は `docs/DESIGN.md` に従う。設計を変える時は、先に DESIGN.md を更新する。
-`docs/RESILIENCE.md` の全項目は受け入れ条件である。対応する故障のテストがすべて通るまで完成としない。
+Upbeater は **GitHub Actions の代替**である。設計は `docs/DESIGN.md` に従う。設計を変える時は、先に DESIGN.md を更新する。
+`docs/RESILIENCE.md` と `docs/RESILIENCE-JOBS.md` の全項目は受け入れ条件である。対応する故障のテストがすべて通るまで完成としない。
 
 ## 絶対に守ること
 
-- 汎用性を最優先する。特定のアプリ・リポジトリ・言語に依存する処理を本体に書かない
+- 汎用性を最優先する。特定のアプリ・リポジトリ・言語・公開先に依存する処理を本体に書かない
 - どの局面でも端末を壊さない。失敗時は必ず動く版に戻る
-- GitHub Actions のワークフロー（`.github/workflows/`）を作らない。CI・公開・ビルドはすべて Actions 以外で行う
-- 秘密情報（Webhook のシークレット、署名用の秘密鍵、GitHub App の秘密鍵、APNs・FCM の資格情報、GitHub のトークン）をリポジトリ・ログ・チャットに出さない
+- GitHub Actions のワークフロー（`.github/workflows/`）を作らない。self-hosted runner も使わない
+- 秘密情報（Webhook のシークレット、署名用の秘密鍵、GitHub App の秘密鍵、APNs・FCM の資格情報、各種 APIキー・トークン）をリポジトリ・ログ・チャットに出さない
 - 成果物は必ず署名と SHA-256 を検証してからインストールする
 
 ## 作業の進め方
 
 1. 直す前に、関係するコードを必ず読む
-2. 直した後に、動作を確認する（hub は `vitest`、app は `flutter test` と `flutter analyze`）
+2. 直した後に、動作を確認する（hub は `vitest`、runner は `go test`、app は `flutter test` と `flutter analyze`）
 3. 既存の機能を壊していないか確認する
 4. ブランチ → プルリクエスト → マージの順で進める
 
