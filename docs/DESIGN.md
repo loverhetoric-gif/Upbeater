@@ -40,8 +40,13 @@ Hub に MCP サーバー（`/mcp`）を持たせ、claude.ai のコネクタと�
 | `rollback` | 指定した版へ戻す |
 | `list_devices` / `get_install_status` | 端末一覧、配信結果 |
 | `create_branch` / `commit_files` / `open_pr` / `merge_pr` | GitHub 操作（次節） |
+| `ship_change` | ブランチ作成 → コミット → PR → マージを一続きで実行。同じ依頼 ID で呼び直すと失敗した段階から続ける |
+| `get_request` / `list_operations` | GitHub 操作の状況、操作の記録（人の判断が要るものの抽出） |
+| `create_registration_code` | 端末を登録する一回限りのコードの発行 |
 
-認証は claude.ai のコネクタが対応する OAuth で行う。
+認証は claude.ai のコネクタが対応する OAuth 2.1 で行う（動的クライアント登録、認可コード＋PKCE（S256）、リフレッシュトークンの回転）。利用者の確認は GitHub でのログイン（GitHub App のユーザー認証）で行い、`ALLOWED_GITHUB_USERS` に載ったアカウントだけを通す。ログイン後に同意の画面を出す。利用者の owner_id は `gh:<GitHub のユーザー ID>`。
+
+MCP は Streamable HTTP（`POST /mcp`、JSON 応答のみ、状態を持たない）で実装する。
 
 ## GitHub 操作の内製化
 
@@ -49,7 +54,10 @@ claude.ai の GitHub コネクタでは、PR 作成時の確認画面が読み�
 
 - 失敗しても止まらない：失敗した段階・理由・再試行できるかを返す。確認画面を介さない
 - マージ後は自動で配信へつながる（main へのマージ → Webhook → 配信）
-- 安全：操作できるリポジトリは許可リストで限定する。main への直接書き込みは禁止し、PR 経由のみとする。マージ前に衝突の有無を確認する
+- 安全：操作できるリポジトリは許可リストで限定する（`register_app` で登録したリポジトリが加わる）。main（既定ブランチ）への直接書き込みは禁止し、PR 経由のみとする。マージ前に衝突の有無を確認する
+- 冪等：各段階の途中結果を `github_requests` に保存し、依頼 ID（省略時は内容から決める）で重複を検知する
+- 衝突：main を取り込んで再試行し、解消できなければ PR を残して、衝突しうるファイルを返す。ブランチ保護・必須の検査で止まる場合は、満たせない条件（失敗・未完了の検査、必須のレビュー）を返す
+- 認証：GitHub App の JWT（RS256）からインストールトークンを得る。トークンが拒否されたら一度だけ取り直す。App の未インストール・秘密鍵の失効は人の判断が要る失敗として記録する
 
 ## 構成
 
@@ -71,6 +79,10 @@ Hub の公開は Cloudflare 側（Workers Builds または wrangler）で行い�
 - `installs`：device_id、app_id、通番、commit_sha、状態、メッセージ、更新日時
 - `operations`：GitHub 操作と配信の履歴（段階、結果、理由、再試行の可否、人の判断の要否）
 - `webhook_deliveries`：受信済みの配信 ID（重複を捨てる。7 日で削除）
+- `owners`：利用者（GitHub のユーザー ID とログイン名）
+- `oauth_clients` / `oauth_requests` / `oauth_codes` / `oauth_tokens`：OAuth のクライアント・認可の途中経過・認可コード・トークン（コードとトークンはハッシュのみ保存）
+- `repo_allowlist`：GitHub 操作を許可するリポジトリ
+- `github_requests`：GitHub 操作の依頼（依頼 ID、段階、途中結果、結果・失敗）
 
 全テーブルに owner_id を持つ。
 
@@ -82,7 +94,7 @@ Hub の公開は Cloudflare 側（Workers Builds または wrangler）で行い�
 - Cron Trigger（15 分ごと）で全アプリを照合する
 - マニフェストは JSON のバイト列を Ed25519 で署名し、base64url で運ぶ。鍵に世代番号を付け、`/v1/keys` で複数世代の公開鍵と失効状態を配る
 - 成果物は Hub が発行する短期限トークン付き URL で、Worker 経由で R2 から配信する（Range・If-Range 対応）
-- 管理 API（`/v1/admin/*`）は MCP が入るまでの暫定。開発順序2で MCP（OAuth）に置き換える
+- 管理 API（`/v1/admin/*`）は暫定。アプリの登録・登録コードの発行は開発順序2で MCP に移した。成果物の登録は開発順序3で Builder の完了報告に置き換える
 
 ## 安全
 

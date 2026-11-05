@@ -176,7 +176,7 @@ describe("GitHub の障害・回数制限", () => {
   it("権限の失効は再試行せず、人の判断が要るものとして記録する", async () => {
     await createApp();
     await mock.setHead(REPO, "main", sha("A"));
-    await mock.fail(1, 401);
+    await mock.fail(3, 401);
     const res = await sendWebhook(pushPayload(REPO, "main", sha("A")));
     expect(await res.json()).toMatchObject({ outcomes: { app1: "failed" } });
     const failed = await ops("app1", "failed");

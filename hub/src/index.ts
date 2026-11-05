@@ -3,6 +3,18 @@ import { AppCoordinator, requestAppSync } from "./coordinator";
 import type { Env } from "./env";
 import { errorResponse, HttpError, json } from "./http";
 import { parseRevoked, parseSigningKeys, publicKeys } from "./manifest";
+import { handleMcp } from "./mcp";
+import {
+  authorizationServerMetadata,
+  cors,
+  handleAuthorize,
+  handleConsent,
+  handleGitHubCallback,
+  handleRegisterClient,
+  handleRevoke,
+  handleToken,
+  protectedResourceMetadata,
+} from "./oauth";
 import { handleCreateApp, handleCreateRegistrationCode, handlePutArtifact, requireAdmin } from "./routes/admin";
 import { handleArtifact } from "./routes/artifacts";
 import { handleCheck, handleRegister, handleReport } from "./routes/devices";
@@ -20,6 +32,22 @@ async function route(req: Request, env: Env): Promise<Response> {
   const m = req.method;
 
   if (p === "/webhook/github" && m === "POST") return handleGitHubWebhook(req, env);
+
+  // MCP と OAuth
+  if (p === "/mcp") return handleMcp(req, env, url.origin);
+  if (m === "OPTIONS" && (p.startsWith("/.well-known/") || p.startsWith("/oauth/"))) return new Response(null, { status: 204, headers: cors() });
+  if (m === "GET" && (p === "/.well-known/oauth-protected-resource" || p === "/.well-known/oauth-protected-resource/mcp")) {
+    return protectedResourceMetadata(url.origin);
+  }
+  if (m === "GET" && (p === "/.well-known/oauth-authorization-server" || p === "/.well-known/oauth-authorization-server/mcp")) {
+    return authorizationServerMetadata(url.origin);
+  }
+  if (p === "/oauth/register" && m === "POST") return handleRegisterClient(req, env);
+  if (p === "/oauth/authorize" && m === "GET") return handleAuthorize(req, env, url.origin);
+  if (p === "/oauth/github/callback" && m === "GET") return handleGitHubCallback(req, env, url.origin);
+  if (p === "/oauth/consent" && m === "POST") return handleConsent(req, env, url.origin);
+  if (p === "/oauth/token" && m === "POST") return handleToken(req, env);
+  if (p === "/oauth/revoke" && m === "POST") return handleRevoke(req, env);
   if (p === "/v1/devices/register" && m === "POST") return handleRegister(req, env);
   if (p === "/v1/devices/check" && m === "POST") return handleCheck(req, env, url.origin);
   if (p === "/v1/devices/report" && m === "POST") return handleReport(req, env);
@@ -62,7 +90,14 @@ export async function sweepAllApps(env: Env): Promise<Record<string, string>> {
     }
   };
   await Promise.all(Array.from({ length: Math.min(CRON_CONCURRENCY, ids.length) }, worker));
-  await env.DB.prepare("DELETE FROM webhook_deliveries WHERE received_at < ?").bind(Date.now() - DELIVERY_RETENTION_MS).run();
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM webhook_deliveries WHERE received_at < ?").bind(now - DELIVERY_RETENTION_MS),
+    // 期限を過ぎた認可の途中経過・コード・トークンを片付ける（コードは再使用の検知のため 1 日残す）
+    env.DB.prepare("DELETE FROM oauth_requests WHERE expires_at < ?").bind(now),
+    env.DB.prepare("DELETE FROM oauth_codes WHERE expires_at < ?").bind(now - 24 * 3600_000),
+    env.DB.prepare("DELETE FROM oauth_tokens WHERE expires_at < ?").bind(now - 24 * 3600_000),
+  ]);
   return out;
 }
 
