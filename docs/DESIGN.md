@@ -82,11 +82,11 @@ jobs:
 - **Android**：PackageInstaller。Android 12 以降、Upbeater が導入元なら確認なしで更新できる
 - **macOS**：`.app` を差し替えて再起動
 - **Linux**：AppImage を差し替えて再起動
-- **iOS**：第 1 段階は通知＋ワンタップ導入（`itms-services`。Ad Hoc 署名と UDID 登録が必要）。第 2 段階で端末内での署名・導入（SideStore と同じ方式）を検討
+- **iOS**：組み込み部品 `install-ios`（macOS の Runner）で、Mac とペアリング済みの iPhone・iPad に同じ Wi-Fi 越しで `.app` を入れる（`xcrun devicectl`）。有料の Apple Developer 登録は使わず、Xcode に入れた Apple ID（無料）で署名する。Runner は証明書のチーム ID を `$UPBEATER_APPLE_TEAM` で渡す（例 `xcodebuild … -allowProvisioningUpdates DEVELOPMENT_TEAM=$UPBEATER_APPLE_TEAM`）。無料の署名は 7 日で切れるため、定期実行（例 `schedule: ['0 3 */3 * *']`）で組み立て直して入れ直す。`with`：`app`（.app のパス・必須）、`device`（名前か UDID。改行で複数。省くとペアリング済みで届くすべて）。届かない時は手順を失敗にし、次の実行で入れる
 
 ### 配布の実装（開発順序6）
 
-- 費用 0 円にするため、通知サービス（FCM・APNs）は使わない。端末のアプリが起動時・復帰時・15 分ごとに Hub に照合する。iOS は有料の Apple Developer 登録が要るため対象外（android・macos・linux）
+- 費用 0 円にするため、通知サービス（FCM・APNs）は使わない。端末のアプリが起動時・復帰時・15 分ごとに Hub に照合する。iOS はこの照合の仕組みではなく、`install-ios`（同じ Wi-Fi 越しの導入）で配る
 - 版：`distribute` の手順で Runner が送ったファイル（成果物の名前 `distribute-<OS>`）を候補にし、ジョブが成功して、既定ブランチの push・手動・定期実行のときだけ配布できる版（ready）にする。通番はリポジトリ × OS ごと。PR・フォーク・失敗したジョブの成果物は捨てる。`distribute.install` に導入の設定（`package`・`bundle`・`bundle_id`・`when_running`・`health_seconds`）を書くと、署名に含めて端末に届く
 - 端末 API：`POST /v1/devices/register`（一回限りの登録コード → 端末トークン。ハッシュのみ保存）・`GET /v1/devices/apps`（app_id はリポジトリの ID）・`POST /v1/devices/check`（途中の版を飛ばして最新の版の署名つきマニフェスト。取得の URL は 10 分の短期限で、鍵は SECRETS_KEY から導く）・`POST /v1/devices/report`・`GET /v1/artifacts/:id`（Range・If-Range に対応）
 - 安全装置（`dist_settings`）：OS ごとの一時停止・巻き戻し（指定の版に固定し、署名つきの巻き戻しの指示を出す）・段階配信（先行する 1 台が入れ終えてから残り全台）。同じ版が 2 台以上で失敗したら、その版を止め（halted）、人の判断が要るものとして記録する

@@ -510,6 +510,9 @@ func (r *runner) baseEnv() map[string]string {
 	env["UPBEATER_WORKSPACE"] = r.ws.Work
 	env["UPBEATER_JOB_ID"] = r.j.Job.ID
 	env["UPBEATER_REPOSITORY"] = r.j.Repo.FullName
+	if t := appleTeam(); t != "" {
+		env["UPBEATER_APPLE_TEAM"] = t // iOS の署名に使う Apple のチーム ID（秘密情報ではない）
+	}
 	env["TMPDIR"] = r.ws.Tmp
 	env["RUNNER_TEMP"] = r.ws.Tmp
 	env["GITHUB_WORKSPACE"] = r.ws.Work // Actions の台本との互換

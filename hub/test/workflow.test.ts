@@ -167,3 +167,11 @@ describe("matrix・式・合図・cron", () => {
     expect(latestDue(parseCron("0 9 * * 1"), Date.UTC(2026, 10, 5, 7, 0))).toBe(Date.UTC(2026, 10, 2, 9, 0)); // 月曜
   });
 });
+
+describe("install-ios", () => {
+  it("iPhone へのワイヤレス導入を組み込み部品として受け付ける", async () => {
+    const { parseWorkflow } = await import("../src/workflow/parse");
+    const r = parseWorkflow(".upbeater/ios.yml", "on: { push: {}, schedule: ['0 3 */3 * *'] }\njobs:\n  ios:\n    runs-on: macos\n    steps:\n      - uses: install-ios\n        with: { app: build/ios/iphoneos/Runner.app }\n");
+    expect(r.ok).toBe(true);
+  });
+});

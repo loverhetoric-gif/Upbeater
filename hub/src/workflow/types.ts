@@ -78,7 +78,7 @@ export interface Workflow {
 export type ParseResult = { ok: true; workflow: Workflow } | { ok: false; problems: Problem[] };
 
 /** 組み込み部品（Actions のよく使われる部品に相当）。runner がこの名前で実装する */
-export const BUILTIN_COMPONENTS = ["checkout", "setup-node", "setup-java", "setup-go", "setup-python", "setup-flutter", "cache", "upload-artifact", "download-artifact"] as const;
+export const BUILTIN_COMPONENTS = ["checkout", "setup-node", "setup-java", "setup-go", "setup-python", "setup-flutter", "cache", "upload-artifact", "download-artifact", "install-ios"] as const;
 
 export const DEFAULT_TIMEOUT_MINUTES = 60;
 export const MAX_TIMEOUT_MINUTES = 24 * 60;
