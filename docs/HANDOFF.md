@@ -47,6 +47,16 @@ Upbeater は GitHub Actions の代替（`docs/DESIGN.md`）。開発順序は DE
 - `builder/`（Node 製）は旧設計の Hub API 向けで、新しい Hub とは接続できない。開発順序2の Go 製 Runner に置き換えたら削除する
 - `app/` は開発順序6で新しい Hub に合わせる
 
+## 公開の準備の進み具合
+
+| 項目 | 状態 |
+| --- | --- |
+| GitHub App の作成 | 済み：`upbeater-loverhetoric`（App ID 5623766、`hub/wrangler.jsonc` に記載）。権限：Checks・Contents・Pull requests・Commit statuses は読み書き、Metadata は読み取り。入れられる先はこのアカウントのみ |
+| 秘密鍵 | 発行済み（利用者の PC に .pem で保管）。Hub の公開時に LININGS. 経由で Secret `GITHUB_APP_PRIVATE_KEY` に入れる |
+| Webhook | 未設定（無効）。Hub の公開後に送り先 `https://<Hub>/webhook/github`、シークレット（`WEBHOOK_SECRET` と同じ値）、合図（push・pull_request・delete）を設定して有効にする |
+| App のインストール | 未（対象のリポジトリに入れる） |
+| Cloudflare（D1・R2 の作成、Secret の投入、`wrangler deploy`） | 未 |
+
 ## 残り（hub）
 
 - 管理 API は暫定（`ADMIN_TOKEN`）。開発順序4で MCP（OAuth）に置き換える
