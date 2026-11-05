@@ -24,8 +24,10 @@
   "vars": {
     "GITHUB_API_BASE": "https://api.github.com",
     "GITHUB_WEB_BASE": "https://github.com",
-    "GITHUB_APP_ID": "",
-    "UPBEATER_BOT_LOGIN": "upbeater[bot]",
+    // GitHub App（upbeater-loverhetoric）の ID。秘密情報ではない
+    "GITHUB_APP_ID": "5623766",
+    // GitHub App の名前に [bot] を付けたもの。自分のコミットを合図にしないために使う
+    "UPBEATER_BOT_LOGIN": "upbeater-loverhetoric[bot]",
     "MANIFEST_REVOKED_GENERATIONS": ""
   }
 }
