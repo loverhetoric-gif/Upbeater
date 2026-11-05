@@ -4,6 +4,16 @@ GitHub Actions の代替の実行環境（macOS・Linux）。Hub からジョブ
 
 ## 入れ方
 
+Hub を公開した PC（`~/.upbeater/hub-secrets.json` がある PC）で、次の 1 行を実行する。何度実行してもよい。
+
+```sh
+sh runner/install.sh
+```
+
+Go が無ければ `~/.upbeater/go` に取得し（go.dev の SHA-256 と照合）、Runner を組み立て、登録コードを発行して Hub に登録し、常駐させる（macOS は launchd、Linux は systemd）。ラベルは macOS なら `macos`、Linux なら `linux`。
+
+手で行う場合：
+
 ```sh
 cd runner
 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=0.1.0" -o upbeater-runner .
