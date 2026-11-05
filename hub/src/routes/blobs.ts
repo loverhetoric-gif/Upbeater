@@ -8,6 +8,7 @@
 import { sha256Hex } from "../crypto";
 import type { Env, RunRow } from "../env";
 import { HttpError, json } from "../http";
+import { DISTRIBUTE_PREFIX, recordPendingRelease } from "../distribute";
 import { authJob, authRunner } from "./runner";
 
 /** 1 件の上限（Workers が受け取れる大きさに合わせる） */
@@ -81,6 +82,8 @@ export async function handleBlob(req: Request, env: Env, id: string, kind: "arti
       env.DB.prepare("DELETE FROM artifacts WHERE job_id = ? AND name = ?").bind(job.id, name),
       env.DB.prepare("INSERT INTO artifacts (id, owner_id, job_id, name, r2_key, size, sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), job.owner_id, job.id, name, key, len, sha, now),
     ]);
+    // 端末への配布のファイル：版の候補として記録する（ジョブが成功したら配布できる状態にする）
+    if (name.startsWith(DISTRIBUTE_PREFIX)) await recordPendingRelease(env, job, name, key, sha, len, filename);
   }
   return json({ ok: true, key: kind === "artifacts" ? name : undefined }, 201);
 }

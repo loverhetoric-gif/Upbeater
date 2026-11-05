@@ -9,6 +9,7 @@ import { HttpError } from "./http";
 import { recordOperation } from "./operations";
 import { assembleLogs } from "./routes/runner";
 import { createSecretForm } from "./routes/secret-form";
+import { createDeviceCode } from "./distribute";
 import { convertWorkflow, type ConvertResult } from "./workflow/convert";
 
 // ───────── 入力の検証（JSON Schema の部分集合） ─────────
@@ -487,6 +488,131 @@ export const TOOLS: Tool[] = [
       const b = (await res.json()) as { url: string; names: string[] };
       await recordOperation(ctx.env, { owner_id: ctx.owner_id, repo_id: repoId || null, kind: "secret", stage: "form_issued", status: "ok", detail: { names: b.names } });
       return { ok: true, url: b.url, names: b.names, note: "この URL を利用者に渡し、値を入れてもらってください（一回限り）" };
+    },
+  },
+
+  // ── 端末への配布 ──
+  {
+    name: "get_install_status",
+    title: "配布の状況",
+    description: "OS ごとの配布できる最新の版・止めた版・巻き戻しの固定・一時停止と、端末ごとのいまの版と最後の結果",
+    inputSchema: { type: "object", properties: { repo: repoArg }, required: ["repo"] },
+    annotations: { readOnlyHint: true },
+    async run(ctx, a) {
+      const repo = await ownedRepo(ctx, a.repo as string);
+      const rel = await ctx.env.DB.prepare(
+        "SELECT platform, seq, commit_sha, status, size, filename, created_at FROM releases WHERE repo_id = ? AND status IN ('ready', 'halted') ORDER BY platform, seq DESC LIMIT 60",
+      )
+        .bind(repo.id)
+        .all<{ platform: string }>();
+      const settings = await ctx.env.DB.prepare("SELECT platform, paused, pinned_seq, staged, canary_device_id FROM dist_settings WHERE repo_id = ?").bind(repo.id).all();
+      const installs = await ctx.env.DB.prepare(
+        "SELECT d.name AS device, d.os, i.seq, i.status, i.message, i.updated_at, d.last_seen_at FROM installs i JOIN devices d ON d.id = i.device_id WHERE i.repo_id = ? ORDER BY d.name",
+      )
+        .bind(repo.id)
+        .all();
+      return { ok: true, repo: repo.full_name, releases: rel.results, settings: settings.results, devices: installs.results };
+    },
+  },
+  {
+    name: "push_update",
+    title: "配布の再開",
+    description: "OS の配布を最新の版で再開する：巻き戻しの固定と一時停止を外す。seq を指定すると、失敗で止めた版をもう一度配れるようにする。端末は次の照合（起動時・復帰時・15 分ごと）で受け取る",
+    inputSchema: { type: "object", properties: { repo: repoArg, platform: { type: "string", enum: ["android", "ios", "macos", "linux"], description: "OS" }, seq: int("止めた版を配り直す時の通番", 1) }, required: ["repo", "platform"] },
+    async run(ctx, a) {
+      const repo = await ownedRepo(ctx, a.repo as string);
+      const platform = a.platform as string;
+      const now = Date.now();
+      if (a.seq !== undefined) {
+        const r = await ctx.env.DB.prepare("UPDATE releases SET status = 'ready', updated_at = ? WHERE repo_id = ? AND platform = ? AND seq = ? AND status IN ('ready', 'halted')").bind(now, repo.id, platform, a.seq).run();
+        if ((r.meta.changes ?? 0) === 0) throw new OpError("release_not_found", `版 ${a.seq}（${platform}）はありません`);
+      }
+      await ctx.env.DB.prepare(
+        `INSERT INTO dist_settings (owner_id, repo_id, platform, paused, pinned_seq, updated_at) VALUES (?, ?, ?, 0, NULL, ?)
+         ON CONFLICT (repo_id, platform) DO UPDATE SET paused = 0, pinned_seq = NULL, updated_at = excluded.updated_at`,
+      )
+        .bind(ctx.owner_id, repo.id, platform, now)
+        .run();
+      const latest = await ctx.env.DB.prepare("SELECT MAX(seq) AS seq FROM releases WHERE repo_id = ? AND platform = ? AND status = 'ready'").bind(repo.id, platform).first<{ seq: number | null }>();
+      await recordOperation(ctx.env, { owner_id: ctx.owner_id, repo_id: repo.id, kind: "release", stage: "push_update", status: "ok", detail: { platform, seq: latest?.seq } });
+      return { ok: true, repo: repo.full_name, platform, latest_seq: latest?.seq ?? null, note: latest?.seq ? "端末は次の照合で最新の版を受け取ります" : "配布できる版がまだありません（distribute の手順のある実行が成功すると版ができます）" };
+    },
+  },
+  {
+    name: "rollback",
+    title: "巻き戻し",
+    description: "OS の配布を指定の版に固定する。新しい版を入れた端末にも、署名つきの巻き戻しの指示で、その版を入れ直させる。push_update で解除する",
+    inputSchema: { type: "object", properties: { repo: repoArg, platform: { type: "string", enum: ["android", "ios", "macos", "linux"], description: "OS" }, seq: int("戻す先の版の通番", 1) }, required: ["repo", "platform", "seq"] },
+    annotations: { destructiveHint: true, idempotentHint: true },
+    async run(ctx, a) {
+      const repo = await ownedRepo(ctx, a.repo as string);
+      const ok = await ctx.env.DB.prepare("SELECT 1 FROM releases WHERE repo_id = ? AND platform = ? AND seq = ? AND status = 'ready'").bind(repo.id, a.platform, a.seq).first();
+      if (!ok) throw new OpError("release_not_found", `配布できる版 ${a.seq}（${a.platform}）はありません`);
+      await ctx.env.DB.prepare(
+        `INSERT INTO dist_settings (owner_id, repo_id, platform, pinned_seq, updated_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (repo_id, platform) DO UPDATE SET pinned_seq = excluded.pinned_seq, updated_at = excluded.updated_at`,
+      )
+        .bind(ctx.owner_id, repo.id, a.platform, a.seq, Date.now())
+        .run();
+      await recordOperation(ctx.env, { owner_id: ctx.owner_id, repo_id: repo.id, kind: "release", stage: "rollback", status: "ok", detail: { platform: a.platform, seq: a.seq } });
+      return { ok: true, repo: repo.full_name, platform: a.platform, pinned_seq: a.seq };
+    },
+  },
+  {
+    name: "set_distribution",
+    title: "配布の設定",
+    description: "OS ごとの配布の一時停止と段階配信（先行する 1 台で入れ終えてから残り全台）を設定する",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: repoArg,
+        platform: { type: "string", enum: ["android", "ios", "macos", "linux"], description: "OS" },
+        paused: { type: "boolean", description: "配布を止める" },
+        staged: { type: "boolean", description: "段階配信にする" },
+        canary_device: str("先行する端末の名前（省くと、その OS で最初に登録した端末）", 100),
+      },
+      required: ["repo", "platform"],
+    },
+    annotations: { idempotentHint: true },
+    async run(ctx, a) {
+      const repo = await ownedRepo(ctx, a.repo as string);
+      let canary: string | null = null;
+      if (a.canary_device) {
+        const d = await ctx.env.DB.prepare("SELECT id FROM devices WHERE owner_id = ? AND name = ? AND os = ?").bind(ctx.owner_id, a.canary_device, a.platform).first<{ id: string }>();
+        if (!d) throw new OpError("device_not_found", `端末「${a.canary_device}」（${a.platform}）はありません`);
+        canary = d.id;
+      }
+      const cur = await ctx.env.DB.prepare("SELECT paused, staged, canary_device_id FROM dist_settings WHERE repo_id = ? AND platform = ?").bind(repo.id, a.platform).first<{ paused: number; staged: number; canary_device_id: string | null }>();
+      const paused = a.paused === undefined ? (cur?.paused ?? 0) : a.paused ? 1 : 0;
+      const staged = a.staged === undefined ? (cur?.staged ?? 0) : a.staged ? 1 : 0;
+      await ctx.env.DB.prepare(
+        `INSERT INTO dist_settings (owner_id, repo_id, platform, paused, staged, canary_device_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (repo_id, platform) DO UPDATE SET paused = excluded.paused, staged = excluded.staged, canary_device_id = excluded.canary_device_id, updated_at = excluded.updated_at`,
+      )
+        .bind(ctx.owner_id, repo.id, a.platform, paused, staged, canary ?? cur?.canary_device_id ?? null, Date.now())
+        .run();
+      return { ok: true, repo: repo.full_name, platform: a.platform, paused: paused === 1, staged: staged === 1 };
+    },
+  },
+  {
+    name: "list_devices",
+    title: "端末の一覧",
+    description: "登録した端末（OS・最後の照合）",
+    inputSchema: { type: "object", properties: {} },
+    annotations: { readOnlyHint: true },
+    async run(ctx) {
+      const r = await ctx.env.DB.prepare("SELECT name, os, created_at, last_seen_at FROM devices WHERE owner_id = ? ORDER BY name").bind(ctx.owner_id).all();
+      return { ok: true, devices: r.results };
+    },
+  },
+  {
+    name: "create_device_code",
+    title: "端末の登録コード",
+    description: "端末の Upbeater アプリに入れる一回限りの登録コード（15 分）を発行する。利用者がアプリの登録画面で、Hub の URL とこのコードを入れる",
+    inputSchema: { type: "object", properties: {} },
+    async run(ctx) {
+      const c = await createDeviceCode(ctx.env, ctx.owner_id);
+      return { ok: true, code: c.code, expires_at: c.expires_at, hub_url: ctx.origin };
     },
   },
 

@@ -131,3 +131,12 @@ Hub（`src/cloud.ts`・テスト `test/cloud.test.ts`、計 103 件）、Runner�
 ### 残り
 
 - 課金が発生するため使わない（利用者の方針）。設定は空のままにし、Linux のジョブは Mac の Runner が受け取る。`cloud-runner/deploy.sh` は任意の追加として残すだけ
+
+## 終わったこと：開発順序6「端末への配布」（Hub）
+
+`cd hub && npm test` で 111 件、`cd app && flutter analyze && flutter test` で 40 件が通る。端末アプリは前から同じ端末 API を話すため、そのまま使える（Dart の版の条件だけを Runner の Flutter に合わせて緩めた）。
+
+### 残り
+
+- 本番の署名鍵（Secret `MANIFEST_SIGNING_KEYS`）を入れる。入れるまで、照合は「署名が設定されていません」（503）を返す
+- 端末アプリの組み立てに公開鍵を埋め込む（`--dart-define UPBEATER_PUBLIC_KEYS='{"1":"<x>"}'`。値は `GET /v1/keys`）。Linux のアプリ（AppImage）は未実装

@@ -14,6 +14,7 @@ import { coordinatorCall, type EventOutcome } from "../coordinator";
 import { randomCode, randomToken, sha256Hex, timingSafeEqual } from "../crypto";
 import type { Env, JobRow, RepoRow, RunRow } from "../env";
 import { bearer, HttpError, int, json, readJson, str } from "../http";
+import { createDeviceCode } from "../distribute";
 import { putSecret } from "../secrets";
 import { createSecretForm } from "./secret-form";
 import { assembleLogs } from "./runner";
@@ -64,6 +65,10 @@ export async function handleAdmin(req: Request, env: Env, p: string): Promise<Re
     const owner = str(b.owner_id, "owner_id", { pattern: ID });
     const repo = b.repo ? (await repoOf(env, owner, str(b.repo, "repo", { pattern: REPO }))).id : "";
     return createSecretForm(env, new URL(req.url).origin, owner, repo, b.names);
+  }
+  if (p === "/v1/admin/device-codes" && m === "POST") {
+    const b = await readJson(req);
+    return json(await createDeviceCode(env, str(b.owner_id, "owner_id", { pattern: ID })), 201);
   }
   if (p === "/v1/admin/mcp-tokens" && m === "POST") {
     const b = await readJson(req);

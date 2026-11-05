@@ -307,13 +307,15 @@ function steps(c: Ctx, n: Node | undefined, jobId: string): Step[] {
     } else {
       const d = get(it, "distribute");
       if (!isMap(d)) return c.err(d, `${where}.distribute は {platform, file} で書いてください`);
-      checkKeys(c, d, ["platform", "file"], `${where}.distribute`);
+      checkKeys(c, d, ["platform", "file", "install"], `${where}.distribute`);
       const platform = get(d, "platform") ? str(c, get(d, "platform"), "platform") : undefined;
       const file = get(d, "file") ? str(c, get(d, "file"), "file") : undefined;
       if (!platform || !["android", "ios", "macos", "linux"].includes(platform)) return c.err(get(d, "platform") ?? d, "distribute.platform は android・ios・macos・linux のどれかです");
       if (!file) return c.err(d, "distribute.file がありません");
       if (idNode !== undefined) c.err(idNode, `${where}.id は distribute には書けません`);
-      out.push({ kind: "distribute", platform, file, ...common });
+      // 導入の設定（例 package: com.example.app、bundle: Example.app、bundle_id、when_running: wait|next_launch|restart、health_seconds）
+      const install = strMap(c, get(d, "install"), `${where}.distribute.install`);
+      out.push({ kind: "distribute", platform, file, ...(Object.keys(install).length ? { install } : {}), ...common });
     }
   });
   return out;

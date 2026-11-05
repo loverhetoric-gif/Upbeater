@@ -108,3 +108,19 @@ describe("直接登録する接続用トークン", () => {
     expect((await rpc(t2, "ping")).status).toBe(200);
   });
 });
+
+describe("配布の道具", () => {
+  it("登録コード・状況・巻き戻し・再開・設定", async () => {
+    const me = await connectWithRepo(REPO);
+    const c = await tool(me.access, "create_device_code");
+    expect(c.code).toBeTruthy();
+    const repo = await env.DB.prepare("SELECT id FROM repos").first<any>();
+    await env.DB.prepare("INSERT INTO releases (id, owner_id, repo_id, platform, seq, commit_sha, status, created_at) VALUES ('r1', ?, ?, 'android', 1, 'x', 'ready', 1)").bind(me.owner, repo.id).run();
+    expect(await tool(me.access, "rollback", { repo: REPO, platform: "android", seq: 9 })).toMatchObject({ ok: false, code: "release_not_found" });
+    expect(await tool(me.access, "rollback", { repo: REPO, platform: "android", seq: 1 })).toMatchObject({ ok: true, pinned_seq: 1 });
+    expect((await tool(me.access, "get_install_status", { repo: REPO })).settings[0]).toMatchObject({ platform: "android", pinned_seq: 1 });
+    expect(await tool(me.access, "set_distribution", { repo: REPO, platform: "android", staged: true })).toMatchObject({ ok: true, staged: true });
+    expect(await tool(me.access, "push_update", { repo: REPO, platform: "android" })).toMatchObject({ ok: true, latest_seq: 1 });
+    expect((await tool(me.access, "get_install_status", { repo: REPO })).settings[0]).toMatchObject({ pinned_seq: null, paused: 0, staged: 1 });
+  });
+});
