@@ -1,5 +1,5 @@
 // Upbeater Hub（Cloudflare Workers）— GitHub Actions の代替
-// 本番の D1・R2 の作成と公開は別の段階で行う。database_id は作成後に置き換える。
+// 公開は scripts/deploy.mjs で行う（D1 は作成済み。R2 は Cloudflare の画面で有効にしてから作る）。
 //
 // Secret（値は `wrangler secret put <名前>` で投入する。値をこのファイル・ログ・チャットに書かない）
 //   WEBHOOK_SECRET          GitHub Webhook の署名検証
@@ -13,7 +13,7 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-08-01",
   "d1_databases": [
-    { "binding": "DB", "database_name": "upbeater", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }
+    { "binding": "DB", "database_name": "upbeater", "database_id": "bae1aab3-cf92-4cbd-be77-b54c34b26142", "migrations_dir": "migrations" }
   ],
   // ログ・成果物・キャッシュ
   "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "upbeater-blobs" }],
