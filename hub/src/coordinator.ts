@@ -108,6 +108,11 @@ export class RepoCoordinator extends DurableObject<Env> {
   }
 
   private async handleEvent(p: PendingEvent, repo: RepoRow, fromAlarm = false): Promise<EventOutcome> {
+    // 一時停止中は合図を受け付けない（手動実行は除く）。再開後の定期照合で、既定ブランチの最新に追いつく
+    if (repo.paused && p.event.kind !== "manual") {
+      await recordOperation(this.env, { owner_id: repo.owner_id, repo_id: repo.id, kind: "event", stage: "paused", status: "ok", reason: "一時停止中のため実行しません", detail: { kind: p.event.kind, sha: p.event.sha } });
+      return { status: "skipped", reason: "一時停止中です" };
+    }
     const gh = createGitHubClient(this.env);
     const ref = parseRepo(repo.full_name);
     try {

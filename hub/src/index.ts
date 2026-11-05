@@ -8,6 +8,8 @@ import { handleBlob } from "./routes/blobs";
 import { handleClaim, handleComplete, handleHeartbeat, handleLogs, handleRegisterRunner, handleStep } from "./routes/runner";
 import { handleSecretForm } from "./routes/secret-form";
 import { handleGitHubWebhook } from "./routes/webhook";
+import { handleMcp } from "./mcp";
+import { authorizationServerMetadata, cors, handleAuthorize, handleConsent, handleGitHubCallback, handleRegisterClient, handleRevoke, handleToken, protectedResourceMetadata } from "./oauth";
 import { runCron } from "./scheduled";
 
 export { RepoCoordinator };
@@ -16,7 +18,19 @@ async function route(req: Request, env: Env): Promise<Response> {
   const url = new URL(req.url);
   const p = url.pathname;
   const m = req.method;
+  const origin = url.origin;
   if (p === "/webhook/github" && m === "POST") return handleGitHubWebhook(req, env);
+  // MCP（claude.ai のコネクタ）と OAuth
+  if (p === "/mcp") return handleMcp(req, env, origin);
+  if (p === "/.well-known/oauth-protected-resource" || p === "/.well-known/oauth-protected-resource/mcp") return protectedResourceMetadata(origin);
+  if (p === "/.well-known/oauth-authorization-server" || p === "/.well-known/openid-configuration") return authorizationServerMetadata(origin);
+  if (p.startsWith("/oauth/") && m === "OPTIONS") return new Response(null, { status: 204, headers: cors() });
+  if (p === "/oauth/register" && m === "POST") return handleRegisterClient(req, env);
+  if (p === "/oauth/authorize" && m === "GET") return handleAuthorize(req, env, origin);
+  if (p === "/oauth/github/callback" && m === "GET") return handleGitHubCallback(req, env, origin);
+  if (p === "/oauth/consent" && m === "POST") return handleConsent(req, env, origin);
+  if (p === "/oauth/token" && m === "POST") return handleToken(req, env);
+  if (p === "/oauth/revoke" && m === "POST") return handleRevoke(req, env);
   if (p === "/v1/runners/register" && m === "POST") return handleRegisterRunner(req, env);
   if (p === "/v1/runners/claim" && m === "POST") return handleClaim(req, env);
   const j = /^\/v1\/runners\/jobs\/([0-9a-f-]{36})\/(heartbeat|logs|steps|complete)$/.exec(p);

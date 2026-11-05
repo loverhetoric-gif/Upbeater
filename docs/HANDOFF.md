@@ -110,3 +110,16 @@ Upbeater は GitHub Actions の代替（`docs/DESIGN.md`）。開発順序は DE
 3. LIFElive の `.upbeater/build.yml`・`deploy.yml`（ブランチ `upbeater-migration`）を PR にし、Runner で動くのを確かめる。Runner の Mac には Flutter 3.47.7 と Java 17 が要る
 4. 秘密情報を Hub に登録する（`node hub/scripts/admin.mjs secret <名前> --repo loverhetoric-gif/LIFElive`）：FIREBASE_*・CLOUDFLARE_API_TOKEN・LIFELIVE_GITHUB_TOKEN・MCP_TOKEN・MUSE_TOKEN・ANTHROPIC_API_KEY・FIREBASE_SERVICE_ACCOUNT、リリース用の GITHUB_TOKEN（contents の書き込み）
 5. 動くのを確かめてから、LIFElive の `.github/workflows` を消して Actions を止める（利用者の確認の後）
+
+## 終わったこと：開発順序3の実地検証
+
+LIFElive の main に `.upbeater/build.yml`・`deploy.yml` が入り、`.github/workflows` は削除済み。Upbeater の Runner で実行され、結果がコミットの状態として GitHub に出ている。
+
+## 終わったこと：開発順序4「MCP と GitHub 操作」
+
+`cd hub && npm test` で 99 件が通る。旧実装（44c1af8）の OAuth・GitHub 操作を新しい Hub に移植し、Actions の代替の道具（実行・ログ・再実行・取り消し・一時停止・移行・秘密情報）を足した（DESIGN.md「MCP の実装」）。
+あわせて、Upbeater 自身の push を定期照合が 10 分後に拾ってしまう不具合（無限の連鎖になりうる）を直した。
+
+### 残り
+
+- GitHub App の Client secret を作り、Secret `GITHUB_APP_CLIENT_SECRET` に入れる。`wrangler.jsonc` の `GITHUB_APP_CLIENT_ID` を App の Client ID にする。App の Callback URL に `https://upbeater-hub.twilight-star-9d9d.workers.dev/oauth/github/callback` を入れる。済めば claude.ai のコネクタに `https://upbeater-hub.twilight-star-9d9d.workers.dev/mcp` を足せる

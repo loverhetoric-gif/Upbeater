@@ -6,6 +6,7 @@
 //   SECRETS_KEY             秘密情報を暗号化する鍵（32 バイトを base64）
 //   ADMIN_TOKEN             管理 API の暫定トークン（開発順序4で MCP に置き換える）
 //   GITHUB_APP_PRIVATE_KEY  GitHub App の秘密鍵（PEM）
+//   GITHUB_APP_CLIENT_SECRET MCP の OAuth（GitHub でのログイン）
 //   MANIFEST_SIGNING_KEYS   端末への配布のマニフェスト署名用の Ed25519 秘密鍵（開発順序6）
 {
   "$schema": "node_modules/wrangler/config-schema.json",
@@ -28,6 +29,10 @@
     "GITHUB_APP_ID": "5623766",
     // GitHub App の名前に [bot] を付けたもの。自分のコミットを合図にしないために使う
     "UPBEATER_BOT_LOGIN": "upbeater-loverhetoric[bot]",
-    "MANIFEST_REVOKED_GENERATIONS": ""
+    "MANIFEST_REVOKED_GENERATIONS": "",
+    // MCP に接続できる GitHub アカウント（ログイン名か数値 ID をカンマ区切り）
+    "ALLOWED_GITHUB_USERS": "loverhetoric-gif",
+    // GitHub App の Client ID（秘密情報ではない。空の間は MCP のログインが使えない）
+    "GITHUB_APP_CLIENT_ID": ""
   }
 }

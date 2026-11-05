@@ -36,6 +36,10 @@ export default defineConfig(async () => {
             GITHUB_APP_PRIVATE_KEY: app.privateKey,
             TEST_APP_PUBLIC_JWK: JSON.stringify(app.publicKey),
             GITHUB_WEB_BASE: "https://github-mock.test",
+            GITHUB_APP_CLIENT_ID: "Iv1.test-client",
+            GITHUB_APP_CLIENT_SECRET: "test-github-client-secret",
+            ALLOWED_GITHUB_USERS: "allowed-user,424242",
+            GITHUB_POLL_MS: "5",
           },
           serviceBindings: { GITHUB_API: "github-mock" },
           workers: [
