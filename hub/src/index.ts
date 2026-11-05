@@ -4,6 +4,7 @@ import type { Env } from "./env";
 import { errorResponse, HttpError, json } from "./http";
 import { parseRevoked, parseSigningKeys, publicKeys } from "./manifest";
 import { handleAdmin } from "./routes/admin";
+import { handleBlob } from "./routes/blobs";
 import { handleClaim, handleComplete, handleHeartbeat, handleLogs, handleRegisterRunner, handleStep } from "./routes/runner";
 import { handleGitHubWebhook } from "./routes/webhook";
 import { runCron } from "./scheduled";
@@ -25,6 +26,8 @@ async function route(req: Request, env: Env): Promise<Response> {
     if (j[2] === "steps") return handleStep(req, env, id);
     return handleComplete(req, env, id);
   }
+  const b = /^\/v1\/runners\/jobs\/([0-9a-f-]{36})\/(artifacts|cache)\/([^/]+)$/.exec(p);
+  if (b) return handleBlob(req, env, b[1]!, b[2] as "artifacts" | "cache", b[3]!);
   if (p.startsWith("/v1/admin/")) return handleAdmin(req, env, p);
   if (p === "/v1/keys" && m === "GET") {
     const keys = parseSigningKeys(env.MANIFEST_SIGNING_KEYS);

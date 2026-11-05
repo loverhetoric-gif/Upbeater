@@ -64,7 +64,7 @@ jobs:
 
 - **Upbeater Runner**：macOS・Linux に常駐する（launchd・systemd）。単一の実行ファイルで配布する（Go）。ラベル例：`macos`・`linux`
 - **クラウド Runner**：Mac が停止していても Linux のジョブを実行できるよう、Google Cloud Run Jobs 上で必要な時だけ起動する
-- 各ジョブは使い捨ての作業場所で実行する（Linux はコンテナ、macOS は専用の一時ディレクトリ）
+- 各ジョブは使い捨ての作業場所で実行する（Linux はコンテナ、macOS は専用の一時ディレクトリ。Linux でコンテナの道具が無い時は一時ディレクトリで実行し、ログにその旨を書く）
 
 ## 秘密情報
 
@@ -123,6 +123,18 @@ Upbeater 自身の検査・公開も Upbeater で行い、Actions は使わな�
 - Runner はジョブを受け取る時にジョブトークンを受け取り、以後の報告に付ける。心拍の途絶で再実行に移ったジョブの古い実行の報告は受け付けない（二重実行の防止）
 - 秘密情報は AES-GCM で暗号化し、ジョブの `secrets` に書かれた分だけ渡す。ログは受け取った時と、つないだ時の両方で伏せる
 - 自分のコミット：送り主が `UPBEATER_BOT_LOGIN` のものは、リポジトリの設定（`trigger_on_own_commits`）が無い限り合図にしない
+
+## Runner の処理（開発順序2で実装）
+
+- 単一の実行ファイル（`runner/`、Go、外部の部品なし）。`register`（一回限りのコード → トークンを権限 600 の設定ファイルへ）・`run`（常駐）・`service install`（macOS は launchd、Linux は systemd のユーザー単位）
+- 作業場所：ジョブごとに `<状態>/work/<ジョブ>-<回>-<乱数>/{work,tmp,home}` を作り、終わったら消す。Linux の既定はコンテナ（docker・podman。作業場所を同じパスで入れ、利用者の uid で実行）、macOS の既定は専用の一時ディレクトリ。起動時に前の実行の残骸（作業場所・ラベル付きのコンテナ）を片付ける
+- 取得：`repo.auth_header` は git の子プロセスの環境変数（`GIT_CONFIG_*`）にだけ渡し、`.git/config` にも手順の環境にも残さない。手順に `checkout` が無ければ最初に取得する
+- 手順：`run` は `bash -eo pipefail`（無ければ `sh -e`）。`if` は Hub と同じ式（`runner/internal/expr`）。`${{ secrets.X }}`・`${{ env.X }}` は台本の中では環境変数の参照に置き換え、値をファイルに書かない。`continue-on-error`・手順の `timeout`・`working-directory` に対応
+- 組み込み部品：`checkout`・`setup-*`（道具が入っていて版が合うかを確かめる。道具は Runner の端末・コンテナのイメージに入れておく）・`cache`・`upload-artifact`・`download-artifact`。`distribute` はファイルを Hub に送る（署名・通知は開発順序6）
+- 子プロセス：手順ごとにプロセスグループを作り、ジョブの終わり・時間超過・中断でグループごと止める（TERM → 5 秒 → KILL）。setsid で抜けたものは環境変数の印（`UPBEATER_JOB_MARK`）で探して止める
+- ログ：Runner でも伏せてから（Hub と同じ変形。書き込みの境目で分かれた値も）通番つきの断片にし、ディスクに保持して送る。Hub が連続して受け取った通番までを消す。届かなかったログと終了の報告は次の起動で送る
+- 心拍：`heartbeat_interval_ms` ごと。`continue: false` なら止める。`stale_job` なら止めて報告しない。Runner の停止（SIGTERM）では報告せず、Hub が心拍の途絶として扱う（`rerun` の指定に従う）
+- 成果物・キャッシュの Hub API：`PUT/GET /v1/runners/jobs/:id/artifacts/:name`（同じ実行の中）・`/cache/:key`（同じリポジトリの中、一度保存したら変えない、フォークからは保存できない）。送る時は SHA-256 を付け、R2 が照合してから保存する。取り出した Runner も照合してから展開する。展開では置き場所の外へ書くもの（`..`・絶対パス・外を指すリンク）を拒否する
 
 ## 移行計画
 
