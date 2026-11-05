@@ -334,14 +334,21 @@ func (r *runner) uploadArtifact(ctx context.Context, name string, paths []string
 	if len(paths) == 0 {
 		return fmt.Errorf("成果物の path がありません")
 	}
-	var entries []archive.Entry
+	// Actions と同じく、指定したものに共通する一番近いフォルダを起点にする
+	// （例：path が app/build/app.apk なら、取り出すと <取り出し先>/app.apk）
+	abs := make([]string, 0, len(paths))
 	for _, p := range paths {
-		abs, err := r.inWork(p)
+		a, err := r.inWork(p)
 		if err != nil {
 			return err
 		}
-		rel, _ := filepath.Rel(r.ws.Work, abs)
-		entries = append(entries, archive.Entry{Name: filepath.ToSlash(filepath.Join("work", rel)), Path: abs})
+		abs = append(abs, a)
+	}
+	base := commonDir(abs)
+	var entries []archive.Entry
+	for _, a := range abs {
+		rel, _ := filepath.Rel(base, a)
+		entries = append(entries, archive.Entry{Name: filepath.ToSlash(filepath.Join("work", rel)), Path: a})
 	}
 	n, err := r.upload(ctx, "artifacts", name, entries)
 	if err != nil {
@@ -349,6 +356,29 @@ func (r *runner) uploadArtifact(ctx context.Context, name string, paths []string
 	}
 	r.line(fmt.Sprintf("成果物「%s」を保存しました（%d 個のファイル）", name, n))
 	return nil
+}
+
+// commonDir は、パスの並びに共通する一番近いフォルダ（ファイルはそのフォルダ、フォルダはそれ自身で数える）。
+func commonDir(paths []string) string {
+	dirs := make([]string, len(paths))
+	for i, p := range paths {
+		if st, err := os.Stat(p); err == nil && st.IsDir() {
+			dirs[i] = p
+		} else {
+			dirs[i] = filepath.Dir(p)
+		}
+	}
+	base := dirs[0]
+	for _, d := range dirs[1:] {
+		for base != d && !strings.HasPrefix(d, base+string(filepath.Separator)) {
+			parent := filepath.Dir(base)
+			if parent == base {
+				break
+			}
+			base = parent
+		}
+	}
+	return base
 }
 
 func (r *runner) downloadArtifact(ctx context.Context, name, dest string) error {

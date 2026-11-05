@@ -5,3 +5,4 @@ export { compileExpr, evaluateIf, ExprError, type ExprContext, type Value } from
 export { parseCron, latestDue, type CronSpec } from "./cron";
 export { expandMatrix, comboLabel, type Combo } from "./matrix";
 export { triggerMatches, globToRegExp, type Event } from "./match";
+export { convertWorkflow, targetPath, type ConvertNote, type ConvertOptions, type ConvertResult } from "./convert";

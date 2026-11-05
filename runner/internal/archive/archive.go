@@ -126,6 +126,10 @@ func Extract(r io.Reader, roots map[string]string) (int, error) {
 		if !ok {
 			return n, fmt.Errorf("書庫に知らない置き場所があります：%s", hdr.Name)
 		}
+		if rest == "" {
+			// 置き場所そのもの（フォルダを起点にまとめた時の最初の項目）。展開の前に作ってある
+			continue
+		}
 		dest := filepath.Join(root, filepath.FromSlash(rest))
 		if !within(root, dest) {
 			return n, fmt.Errorf("書庫に置き場所の外を指す名前があります：%s", hdr.Name)

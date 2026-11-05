@@ -144,6 +144,7 @@ func (c *Client) Register(ctx context.Context, code, name string, labels []strin
 // Step は定義ファイルの手順（Hub の Step 型と同じ形）。
 type Step struct {
 	Kind             string            `json:"kind"`
+	ID               string            `json:"id,omitempty"`
 	Name             string            `json:"name,omitempty"`
 	Run              string            `json:"run,omitempty"`
 	Uses             string            `json:"uses,omitempty"`

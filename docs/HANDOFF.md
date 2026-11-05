@@ -92,8 +92,21 @@ Upbeater は GitHub Actions の代替（`docs/DESIGN.md`）。開発順序は DE
 - 実行ファイルの配布と自己更新（署名と SHA-256 を検証してから差し替える。開発順序6の配布の仕組みを使う）
 - `setup-*` で道具を自動で入れること（いまは版の確認のみ）
 
-## 次にやること：開発順序3「移行ツール ＋ LIFElive の移行で実地検証」
+## 進行中：開発順序3「移行ツール ＋ LIFElive の移行で実地検証」
 
-1. `.github/workflows/*.yml` を読み、`.upbeater/*.yml` に変換する（`hub/src/workflow/` の部品を使う）。変換できない部分を行番号つきで一覧にする
-2. LIFElive の `build.yml`・`deploy.yml` を変換し、Runner で実際に動かして結果を GitHub に表示する
-3. Actions 側を止める手順を用意する（止めるのは利用者の確認の後）
+`cd hub && npm test` で 66 件、`cd runner && go test ./...` が通る（`internal/proc` の `TestTimeoutKillsDescendants` だけは macOS に `setsid` が無いため失敗する。Linux では通る。今回の変更の前から同じ）。
+
+| 項目 | 実装 |
+| --- | --- |
+| 変換の部品 | `hub/src/workflow/convert.ts`：合図・ジョブ・部品・式の変換。変換できないものは行番号つきの「変換できません」にし、定義ではその手順を失敗させる。書いた定義は `parseWorkflow` で検証。`test/convert.test.ts` |
+| 利用者の PC の道具 | `hub/scripts/migrate.mjs <フォルダ> [--check] [--label linux=macos] [--force]`（`cd hub && npm ci` が先に要る） |
+| 定義の追加 | 手順の `id`（`steps.<id>.outputs.<名前>`・`outcome`・`conclusion`）、concurrency の group の `${{ ref }}`・`${{ branch }}`・`${{ event }}` |
+| Runner の互換 | `runner/internal/job/compat.go`：`CI`・`GITHUB_SHA` などの環境変数、`GITHUB_OUTPUT`・`GITHUB_ENV`・`GITHUB_PATH`・`GITHUB_STEP_SUMMARY`。ジョブの env の `${{ secrets.X }}` を値にする。成果物は Actions と同じく、指定したものに共通するフォルダを起点にまとめる |
+
+### 残り
+
+1. この変更を Hub に公開し（`hub/scripts/deploy.mjs`）、Runner を組み立て直す（`sh runner/install.sh`）
+2. GitHub App に Checks の読み書きの権限を足す（結果を PR に出すため。利用者が GitHub の画面で行う）
+3. LIFElive の `.upbeater/build.yml`・`deploy.yml`（ブランチ `upbeater-migration`）を PR にし、Runner で動くのを確かめる。Runner の Mac には Flutter 3.47.7 と Java 17 が要る
+4. 秘密情報を Hub に登録する（`node hub/scripts/admin.mjs secret <名前> --repo loverhetoric-gif/LIFElive`）：FIREBASE_*・CLOUDFLARE_API_TOKEN・LIFELIVE_GITHUB_TOKEN・MCP_TOKEN・MUSE_TOKEN・ANTHROPIC_API_KEY・FIREBASE_SERVICE_ACCOUNT、リリース用の GITHUB_TOKEN（contents の書き込み）
+5. 動くのを確かめてから、LIFElive の `.github/workflows` を消して Actions を止める（利用者の確認の後）
