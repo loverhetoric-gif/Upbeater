@@ -145,6 +145,10 @@ async function main() {
     headers: { authorization: `Bearer ${appJwt(APP_ID, pem)}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "upbeater-deploy" },
     body: JSON.stringify({ url: `${url}/webhook/github`, content_type: "json", secret: values.WEBHOOK_SECRET, insecure_ssl: "0" }),
   });
+  if (res.status === 404) {
+    fail(`GitHub App の Webhook がまだ無効です。https://github.com/settings/apps/upbeater-loverhetoric の「Webhook」で Active にチェックを入れ、
+  Webhook URL に ${url}/webhook/github を入れて保存してから、もう一度実行してください`);
+  }
   if (!res.ok) fail(`GitHub App の Webhook を設定できませんでした（${res.status}）。秘密鍵が App（ID ${APP_ID}）のものか確かめてください`);
   log("GitHub App：Webhook の送り先とシークレットを設定しました");
 
