@@ -142,7 +142,7 @@ describe("移行ツール（Actions → Upbeater）", () => {
     expect(warnings).toEqual(
       expect.arrayContaining([
         expect.stringMatching(/sed -i/),
-        expect.stringMatching(/permissions は使いません。GitHub に書き込む手順には/),
+        expect.stringMatching(/permissions は使いません。GITHUB_TOKEN には GitHub App/),
         expect.stringMatching(/setup-node の cache は使いません/),
         expect.stringMatching(/retention-days/),
         expect.stringMatching(/ジョブごとに分けて/),

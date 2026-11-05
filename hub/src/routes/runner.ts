@@ -98,8 +98,10 @@ export async function handleClaim(req: Request, env: Env): Promise<Response> {
 
   // 取得用の短期トークン（GitHub App のインストールトークン）
   let authHeader: string | null = null;
+  let appToken: string | null = null;
   try {
     const t = await createGitHubTokenProvider(env).getToken(parseRepo(repo.full_name));
+    appToken = t || null;
     if (t) authHeader = `Authorization: Basic ${btoa(`x-access-token:${t}`)}`;
   } catch (e) {
     if (!(e instanceof GitHubError) || e.retryable) {
@@ -114,6 +116,8 @@ export async function handleClaim(req: Request, env: Env): Promise<Response> {
 
   // 秘密情報：このジョブに指定された分だけ渡す。フォークからの PR には渡さない
   const secrets = run.is_fork ? {} : await resolveSecrets(env, repo.owner_id, repo.id, spec.secrets);
+  // GITHUB_TOKEN：利用者が登録していなければ、Actions と同じように GitHub App のトークンを渡す（このリポジトリだけに効く短期トークン）
+  if (!run.is_fork && spec.secrets.includes("GITHUB_TOKEN") && !secrets.GITHUB_TOKEN && appToken) secrets.GITHUB_TOKEN = appToken;
   await env.DB.batch([
     env.DB.prepare("UPDATE runs SET status = 'running', updated_at = ? WHERE id = ? AND status = 'queued'").bind(now, run.id),
     operationStatement(env, { owner_id: repo.owner_id, repo_id: repo.id, run_id: run.id, job_id: job.id, kind: "job", stage: "claimed", status: "ok", detail: { runner: runner.name, attempt: job.attempt, secrets_withheld: run.is_fork === 1 && spec.secrets.length > 0 } }, now),
@@ -164,7 +168,14 @@ async function maskerFor(env: Env, job: JobRow): Promise<Masker> {
   const hit = maskerCache.get(key);
   if (hit && Date.now() - hit.at < 10 * 60_000) return hit.masker;
   const spec = JSON.parse(job.spec) as JobSpec;
-  const values = Object.values(await resolveSecrets(env, job.owner_id, job.repo_id, spec.secrets));
+  const resolved = await resolveSecrets(env, job.owner_id, job.repo_id, spec.secrets);
+  if (spec.secrets.includes("GITHUB_TOKEN") && !resolved.GITHUB_TOKEN) {
+    // 自動で渡した GitHub App のトークンも伏せる
+    const repo = await env.DB.prepare("SELECT full_name FROM repos WHERE id = ?").bind(job.repo_id).first<{ full_name: string }>();
+    const t = repo ? await createGitHubTokenProvider(env).getToken(parseRepo(repo.full_name)).catch(() => "") : "";
+    if (t) resolved.GITHUB_TOKEN = t;
+  }
+  const values = Object.values(resolved);
   const masker = new Masker(values);
   if (maskerCache.size > 500) maskerCache.clear();
   maskerCache.set(key, { masker, at: Date.now() });

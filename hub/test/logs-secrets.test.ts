@@ -48,6 +48,23 @@ describe("秘密情報", () => {
     expect(c.secrets_withheld).toBe(false);
   });
 
+  it("GITHUB_TOKEN は、登録が無ければ GitHub App のトークンを自動で渡し、ログでは伏せる。登録があればそちらを使う", async () => {
+    const t = await setup();
+    const D = DEF.replace("[DEPLOY_TOKEN]", "[GITHUB_TOKEN]");
+    await pushAndRun("a", { ".upbeater/ci.yml": D });
+    const c = (await claim(t)).body;
+    const tok = c.secrets.GITHUB_TOKEN as string;
+    expect(typeof tok).toBe("string");
+    expect(tok.length).toBeGreaterThan(5);
+    await jobCall(t, c.job.id, c.job_token, "logs", { chunks: [{ seq: 1, text: `t=${tok}\n` }] });
+    await jobCall(t, c.job.id, c.job_token, "complete", { conclusion: "success", last_seq: 1 });
+    expect(await logs(c.job.id)).not.toContain(tok);
+    // 登録があれば、そちらを優先する
+    await admin("PUT", "/v1/admin/secrets", { owner_id: "owner1", name: "GITHUB_TOKEN", value: "registered-pat-12345" });
+    await pushAndRun("b", { ".upbeater/ci.yml": D });
+    expect((await claim(t)).body.secrets).toEqual({ GITHUB_TOKEN: "registered-pat-12345" });
+  });
+
   it("フォークからの PR には秘密情報を渡さない", async () => {
     const t = await setup();
     await commit("pr", { ".upbeater/ci.yml": DEF }, { branch: null });

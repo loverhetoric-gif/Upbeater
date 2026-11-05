@@ -544,7 +544,7 @@ class Converter {
         .replace(/\bgithub\.token\b/g, "secrets.GITHUB_TOKEN");
       if (/\bsecrets\.GITHUB_TOKEN\b/i.test(p)) {
         p = p.replace(/\bsecrets\.github_token\b/gi, "secrets.GITHUB_TOKEN");
-        this.note(n, "warning", "GitHub が自動で発行するトークン（github.token）は Upbeater にありません。必要な権限のトークンを、秘密情報 GITHUB_TOKEN として Hub に登録してください");
+        this.note(n, "warning", "github.token は secrets.GITHUB_TOKEN に直しました。登録しなければ、Hub が GitHub App のトークン（App に許した権限）を自動で渡します");
       }
       p = p.replace(/\bsecrets\.([A-Za-z_][A-Za-z0-9_]*)/g, (_, s: string) => `secrets.${s.toUpperCase()}`);
       for (const m of p.matchAll(/[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_*-]+)*/g)) {
@@ -601,7 +601,7 @@ function workingDir(n: Node | undefined): string | undefined {
 function permissionsNote(n: Node): string {
   const s = JSON.stringify(n?.toJSON?.() ?? null);
   return /write/.test(s)
-    ? "permissions は使いません。GitHub に書き込む手順には、必要な権限のトークンを秘密情報 GITHUB_TOKEN として Hub に登録してください"
+    ? "permissions は使いません。GITHUB_TOKEN には GitHub App に許した権限が付きます（足りない時は、必要な権限のトークンを秘密情報 GITHUB_TOKEN として登録する）"
     : "permissions は使いません";
 }
 function collectSecrets(n: Node | null | undefined): Set<string> {
