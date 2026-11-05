@@ -1,0 +1,38 @@
+// Upbeater Hub（Cloudflare Workers）
+// 本番の D1・R2 の作成と公開は別の段階で行う。database_id は作成後に置き換える。
+//
+// Secret（値は `wrangler secret put <名前>` で投入する。値をこのファイル・ログ・チャットに書かない）
+//   WEBHOOK_SECRET          GitHub Webhook の署名検証用シークレット
+//   MANIFEST_SIGNING_KEYS   マニフェスト署名用の Ed25519 秘密鍵（世代番号つき、JSON）
+//   DOWNLOAD_TOKEN_SECRET   成果物の短期限 URL を署名する鍵
+//   ADMIN_TOKEN             管理 API の暫定トークン（開発順序2で MCP の OAuth に置き換える）
+//   GITHUB_TOKEN            （任意）GitHub API の暫定トークン。開発順序2で GitHub App に置き換える
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "upbeater-hub",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "upbeater",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    { "binding": "ARTIFACTS", "bucket_name": "upbeater-artifacts" }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "APP_COORDINATOR", "class_name": "AppCoordinator" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AppCoordinator"] }],
+  // 取りこぼし対策の巡回（15 分ごと）
+  "triggers": { "crons": ["*/15 * * * *"] },
+  "vars": {
+    "GITHUB_API_BASE": "https://api.github.com",
+    // 失効させた署名鍵の世代（カンマ区切り）
+    "MANIFEST_REVOKED_GENERATIONS": "",
+    "ARTIFACT_URL_TTL_SECONDS": "600"
+  }
+}

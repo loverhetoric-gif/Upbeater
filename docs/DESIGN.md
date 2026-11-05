@@ -63,11 +63,26 @@ Hub の公開は Cloudflare 側（Workers Builds または wrangler）で行い�
 
 ## データ（D1）
 
-- `apps`：id、owner_id、名前、リポジトリ、ブランチ、配布の種類、対象 OS、OS ごとの手順
-- `releases`：app_id、commit_sha、OS、R2 のキー、SHA-256、サイズ、作成日時、状態
+- `apps`：id、owner_id、名前、リポジトリ、ブランチ、配布の種類、対象 OS、OS ごとの手順、最新の通番、巻き戻し先の通番
+- `app_versions`：app_id、通番、commit_sha、検知の経路（webhook・cron・retry）。版は「コミット SHA ＋ Hub が発行する単調増加の通番」で表す
+- `releases`：app_id、通番、commit_sha、OS、R2 のキー、SHA-256、サイズ、作成日時、状態（pending・ready・failed・cancelled・halted）
 - `devices`：id、owner_id、名前、OS、通知トークン、認証トークンのハッシュ、最終接続
-- `installs`：device_id、app_id、commit_sha、状態、メッセージ、更新日時
-- `operations`：GitHub 操作と配信の履歴（段階、結果、理由）
+- `registration_codes`：一回限りの登録コードのハッシュ、有効期限、使用日時
+- `installs`：device_id、app_id、通番、commit_sha、状態、メッセージ、更新日時
+- `operations`：GitHub 操作と配信の履歴（段階、結果、理由、再試行の可否、人の判断の要否）
+- `webhook_deliveries`：受信済みの配信 ID（重複を捨てる。7 日で削除）
+
+全テーブルに owner_id を持つ。
+
+## Hub の処理（開発順序1で実装）
+
+- 同じアプリの照合は Durable Object（`AppCoordinator`、アプリごとに 1 つ）で直列化する。処理中に届いた依頼は 1 回の再照合にまとめる
+- 照合では push の中身を使わず、GitHub API で対象ブランチの現在のコミットを照会する。最新の通番と同じコミットなら何もしない
+- GitHub の障害・回数制限は DO の永続領域と alarm を待ち行列として、30 秒から倍々（上限 1 時間、GitHub の指定があればそれ以上）で再試行する
+- Cron Trigger（15 分ごと）で全アプリを照合する
+- マニフェストは JSON のバイト列を Ed25519 で署名し、base64url で運ぶ。鍵に世代番号を付け、`/v1/keys` で複数世代の公開鍵と失効状態を配る
+- 成果物は Hub が発行する短期限トークン付き URL で、Worker 経由で R2 から配信する（Range・If-Range 対応）
+- 管理 API（`/v1/admin/*`）は MCP が入るまでの暫定。開発順序2で MCP（OAuth）に置き換える
 
 ## 安全
 
