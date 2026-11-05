@@ -132,3 +132,34 @@ func Save(path string, c *Config) error {
 	}
 	return os.Rename(tmp, path)
 }
+
+// FromEnv はクラウド Runner（コンテナ）の設定を環境変数から作る。UPBEATER_RUNNER_TOKEN が無ければ nil。
+// コンテナそのものが使い捨てのため、作業場所は一時ディレクトリにし、設定はディスクに書かない。
+func FromEnv() (*Config, error) {
+	token := os.Getenv("UPBEATER_RUNNER_TOKEN")
+	if token == "" {
+		return nil, nil
+	}
+	base, err := ValidateHubURL(os.Getenv("UPBEATER_HUB_URL"))
+	if err != nil {
+		return nil, err
+	}
+	var labels []string
+	for _, l := range strings.Split(os.Getenv("UPBEATER_RUNNER_LABELS"), ",") {
+		if l = strings.TrimSpace(l); l != "" {
+			labels = append(labels, l)
+		}
+	}
+	if len(labels) == 0 {
+		labels = DefaultLabels()
+	}
+	return &Config{
+		HubURL:    base,
+		RunnerID:  os.Getenv("UPBEATER_RUNNER_ID"),
+		Token:     token,
+		Name:      "cloud",
+		Labels:    labels,
+		Isolation: "dir",
+		StateDir:  filepath.Join(os.TempDir(), "upbeater-runner"),
+	}, nil
+}

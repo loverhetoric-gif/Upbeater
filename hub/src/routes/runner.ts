@@ -28,12 +28,14 @@ interface RunnerRow {
   owner_id: string;
   name: string;
   labels: string;
+  /** 使い捨ての Runner が受け取れるジョブ（それ以外は受け取れない） */
+  job_id: string | null;
 }
 
 export async function authRunner(req: Request, env: Env): Promise<RunnerRow> {
   const t = bearer(req);
   if (!t || !t.startsWith(RUNNER_TOKEN_PREFIX)) throw new HttpError(401, "unauthorized");
-  const r = await env.DB.prepare("SELECT id, owner_id, name, labels FROM runners WHERE token_hash = ? AND revoked_at IS NULL").bind(await sha256Hex(t)).first<RunnerRow>();
+  const r = await env.DB.prepare("SELECT id, owner_id, name, labels, job_id FROM runners WHERE token_hash = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)").bind(await sha256Hex(t), Date.now()).first<RunnerRow>();
   if (!r) throw new HttpError(401, "unauthorized");
   return r;
 }
@@ -82,13 +84,13 @@ export async function handleClaim(req: Request, env: Env): Promise<Response> {
   const job = await env.DB.prepare(
     `UPDATE jobs SET status = 'claimed', runner_id = ?, job_token_hash = ?, attempt = attempt + 1, claimed_at = ?, heartbeat_at = ?, cancel_requested = 0, updated_at = ?
      WHERE id = (
-       SELECT j.id FROM jobs j WHERE j.owner_id = ? AND j.status = 'queued'
+       SELECT j.id FROM jobs j WHERE j.owner_id = ? AND j.status = 'queued' AND (? IS NULL OR j.id = ?)
          AND NOT EXISTS (SELECT 1 FROM json_each(j.runs_on) l WHERE l.value NOT IN (SELECT value FROM json_each(?)))
        ORDER BY j.created_at, j.id LIMIT 1)
        AND status = 'queued'
      RETURNING *`,
   )
-    .bind(runner.id, await sha256Hex(token), now, now, now, runner.owner_id, JSON.stringify(labels))
+    .bind(runner.id, await sha256Hex(token), now, now, now, runner.owner_id, runner.job_id, runner.job_id, JSON.stringify(labels))
     .first<JobRow>();
   if (!job) return new Response(null, { status: 204 });
 

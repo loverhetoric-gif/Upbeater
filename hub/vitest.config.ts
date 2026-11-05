@@ -18,6 +18,8 @@ export default defineConfig(async () => {
     privateKeyEncoding: { type: "pkcs1", format: "pem" },
     publicKeyEncoding: { type: "spki", format: "jwk" as never },
   }) as unknown as { privateKey: string; publicKey: JsonWebKey };
+  // クラウド Runner 用のサービスアカウントの鍵も使い捨て
+  const sa = generateKeyPairSync("rsa", { modulusLength: 2048, privateKeyEncoding: { type: "pkcs8", format: "pem" }, publicKeyEncoding: { type: "spki", format: "pem" } });
   return {
     plugins: [
       cloudflareTest({
@@ -40,8 +42,14 @@ export default defineConfig(async () => {
             GITHUB_APP_CLIENT_SECRET: "test-github-client-secret",
             ALLOWED_GITHUB_USERS: "allowed-user,424242",
             GITHUB_POLL_MS: "5",
+            GCP_PROJECT: "test-project",
+            GCP_REGION: "asia-northeast1",
+            CLOUD_RUN_JOB: "upbeater-runner",
+            GCP_SERVICE_ACCOUNT_KEY: JSON.stringify({ client_email: "runner@test-project.iam.gserviceaccount.com", private_key: sa.privateKey }),
+            GCP_TOKEN_URL: "https://github-mock.test/__gcp/token",
+            GCP_RUN_BASE: "https://github-mock.test/__gcp/run",
           },
-          serviceBindings: { GITHUB_API: "github-mock" },
+          serviceBindings: { GITHUB_API: "github-mock", GCP_API: "github-mock" },
           workers: [
             {
               name: "github-mock",
