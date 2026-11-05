@@ -37,14 +37,14 @@ describe("合図の受信（Webhook）", () => {
   it("Upbeater 自身のコミットは、既定では合図にしない（設定で変えられる）", async () => {
     await registerRepo();
     const s = await commit("a", { ".upbeater/ci.yml": CI });
-    const r = await webhook("push", push(s, { sender: "upbeater[bot]" }));
+    const r = await webhook("push", push(s, { sender: env.UPBEATER_BOT_LOGIN! }));
     expect(Object.values(((await r.json()) as any).outcomes)).toEqual(["skipped"]);
     expect(await runs()).toHaveLength(0);
     const ops = await env.DB.prepare("SELECT stage FROM operations WHERE stage = 'own_commit'").all();
     expect(ops.results).toHaveLength(1);
 
     await env.DB.prepare("UPDATE repos SET trigger_on_own_commits = 1").run();
-    await webhook("push", push(s, { sender: "upbeater[bot]" }));
+    await webhook("push", push(s, { sender: env.UPBEATER_BOT_LOGIN! }));
     expect(await runs()).toHaveLength(1);
   });
 
