@@ -101,3 +101,23 @@ describe("OAuth（claude.ai のコネクタ）", () => {
     expect(r.status).toBe(400);
   });
 });
+
+describe("事前の許可（GitHub でのログインなしで claude.ai をつなぐ）", () => {
+  it("許可は claude.ai からの 1 回だけ通し、2 回目と他の戻り先は通さない", async () => {
+    const pre = await SELF.fetch(`${ORIGIN}/v1/admin/oauth-preapprovals`, { method: "POST", headers: { authorization: "Bearer test-admin-token", "content-type": "application/json" }, body: JSON.stringify({ owner_id: "gh:1001" }) });
+    expect(pre.status).toBe(201);
+    const go = async (redirect = REDIRECT) => {
+      const clientId = await registerClient(redirect);
+      const { verifier, challenge } = await pkce();
+      const q = new URLSearchParams({ response_type: "code", client_id: clientId, redirect_uri: redirect, code_challenge: challenge, code_challenge_method: "S256", state: "s1" });
+      return { r: await SELF.fetch(`${ORIGIN}/oauth/authorize?${q}`, { redirect: "manual" }), clientId, verifier };
+    };
+    expect(new URL((await go("http://localhost:3000/cb")).r.headers.get("location")!).host).toBe("github-mock.test");
+    const a = await go();
+    const loc = new URL(a.r.headers.get("location")!);
+    expect(loc.origin + loc.pathname).toBe(REDIRECT);
+    const t = await token({ grant_type: "authorization_code", code: loc.searchParams.get("code")!, client_id: a.clientId, redirect_uri: REDIRECT, code_verifier: a.verifier });
+    expect((await rpc(t.body.access_token, "ping")).status).toBe(200);
+    expect(new URL((await go()).r.headers.get("location")!).host).toBe("github-mock.test");
+  });
+});

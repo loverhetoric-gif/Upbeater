@@ -16,6 +16,8 @@ const CODE_TTL_MS = 2 * 60_000;
 const REQUEST_TTL_MS = 10 * 60_000;
 const COOKIE = "__Host-upb_oauth";
 export const SCOPE = "upbeater";
+/** 事前の許可を使える戻り先（claude.ai のコネクタ） */
+const PREAPPROVE_HOSTS = ["claude.ai", "claude.com"];
 
 export function resourceUrl(origin: string): string {
   return `${origin}/mcp`;
@@ -156,8 +158,26 @@ export async function handleAuthorize(req: Request, env: Env, origin: string): P
   if (resource && resource.replace(/\/$/, "") !== resourceUrl(origin) && resource.replace(/\/$/, "") !== origin) {
     return back("invalid_target", "resource が Upbeater ではありません");
   }
+  // 事前の許可：管理者が出した「次の 1 回」を、claude.ai からの接続に限って使う（GitHub でのログインを省く）
+  if (PREAPPROVE_HOSTS.includes(new URL(redirectUri).hostname)) {
+    const now = Date.now();
+    const pre = await env.DB.prepare(
+      "UPDATE oauth_preapprovals SET used_at = ?, client_id = ? WHERE id = (SELECT id FROM oauth_preapprovals WHERE used_at IS NULL AND expires_at > ? ORDER BY created_at DESC LIMIT 1) AND used_at IS NULL RETURNING owner_id",
+    )
+      .bind(now, clientId, now)
+      .first<{ owner_id: string }>();
+    if (pre) {
+      const code = randomToken("upb_ac_", 32);
+      await env.DB.prepare(
+        `INSERT INTO oauth_codes (code_hash, owner_id, grant_id, client_id, redirect_uri, code_challenge, scope, resource, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+        .bind(await sha256Hex(code), pre.owner_id, crypto.randomUUID(), clientId, redirectUri, challenge, q.get("scope") ?? SCOPE, resource ?? resourceUrl(origin), now + CODE_TTL_MS, now)
+        .run();
+      return redirectWith(redirectUri, { code, state, iss: origin });
+    }
+  }
   if (!env.GITHUB_APP_CLIENT_ID || !env.GITHUB_APP_CLIENT_SECRET) {
-    return back("temporarily_unavailable", "GitHub でのログインが設定されていません");
+    return htmlResponse(errorPage("接続の許可がまだ出ていません。Upbeater の管理者が許可を出してから、もう一度つないでください。"), 403);
   }
 
   const id = randomToken("", 24);
