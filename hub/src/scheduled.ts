@@ -1,6 +1,7 @@
 /**
  * Cron（毎分）：定期実行・心拍の途絶と時間超過の検知・結果表示の再試行・Webhook の取りこぼしの照合・Runner 不在の通知
  */
+import { dispatchCloudRunners } from "./cloud";
 import { flushChecks } from "./checks";
 import { coordinatorCall } from "./coordinator";
 import type { Env, JobRow, JobSpec, RepoRow } from "./env";
@@ -100,7 +101,7 @@ export async function sweepJobs(env: Env, now = Date.now()): Promise<{ lost: num
   return { lost, timedOut };
 }
 
-/** 受け取る Runner がいないまま待っているジョブを一度だけ通知する（クラウド Runner は開発順序5） */
+/** 受け取る Runner がいないまま待っているジョブを一度だけ通知する（Linux はクラウド Runner が受け取る。macOS 専用などは復帰を待つ） */
 export async function noticeWaitingJobs(env: Env, now = Date.now()): Promise<number> {
   const rows = await env.DB.prepare("SELECT * FROM jobs WHERE status = 'queued' AND waiting_notified = 0 AND created_at < ?").bind(now - NO_RUNNER_NOTICE_MS).all<JobRow>();
   for (const j of rows.results) {
@@ -159,6 +160,7 @@ export async function runCron(env: Env, now = Date.now()): Promise<void> {
     ["sweep", () => sweepJobs(env, now)],
     ["notice", () => noticeWaitingJobs(env, now)],
     ["reconcile", () => reconcile(env, { now })],
+    ["cloud", () => (env.HUB_URL ? dispatchCloudRunners(env, env.HUB_URL, now) : Promise.resolve(0))],
     ["checks", () => flushChecks(env, { now })],
     [
       "cleanup",
@@ -169,6 +171,7 @@ export async function runCron(env: Env, now = Date.now()): Promise<void> {
           env.DB.prepare("DELETE FROM oauth_requests WHERE expires_at < ?").bind(now),
           env.DB.prepare("DELETE FROM oauth_codes WHERE expires_at < ?").bind(now - 86_400_000),
           env.DB.prepare("DELETE FROM oauth_tokens WHERE expires_at < ?").bind(now - 86_400_000),
+          env.DB.prepare("DELETE FROM runners WHERE ephemeral = 1 AND expires_at < ?").bind(now - 7 * 86_400_000),
         ]),
     ],
   ];

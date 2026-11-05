@@ -25,6 +25,8 @@ function reset() {
     protect: new Map(), // repo → { failing, pending, passing, reviews, strict }
     unknownMergeable: 0,
     races: new Map(), // "repo#branch" → 残り回数
+    gcpRuns: [], // Cloud Run Jobs の起動（{ path, body }）
+    gcpFail: 0,
   };
 }
 reset();
@@ -170,6 +172,8 @@ function control(p, body) {
     case "/__mock/pulls": return json(S.pulls.get(body.repo.toLowerCase()) ?? []);
     case "/__mock/protect": S.protect.set(body.repo.toLowerCase(), body); return json({ ok: true });
     case "/__mock/unknown-mergeable": S.unknownMergeable = body.count; return json({ ok: true });
+    case "/__mock/gcp-runs": return json(S.gcpRuns);
+    case "/__mock/gcp-fail": S.gcpFail = body.count; return json({ ok: true });
     case "/__mock/race": S.races.set(bkey(body.repo, body.branch), body.count); return json({ ok: true });
   }
   return json({ error: "unknown" }, 404);
@@ -182,6 +186,16 @@ export default {
     const method = req.method;
     const body = method === "GET" ? {} : await req.json().catch(() => ({}));
     if (p.startsWith("/__mock/")) return control(p, body);
+    // ── Google（クラウド Runner） ──
+    if (p === "/__gcp/token" && method === "POST") return json({ access_token: "ya29.test", expires_in: 3600 });
+    if (p.startsWith("/__gcp/run/") && method === "POST") {
+      if (S.gcpFail > 0) {
+        S.gcpFail--;
+        return json({ error: { message: "unavailable" } }, 503);
+      }
+      S.gcpRuns.push({ path: p.slice("/__gcp/run".length), auth: req.headers.get("authorization"), body });
+      return json({ name: "operations/x" });
+    }
     const fi = S.failures.findIndex((f) => (!f.path || p.includes(f.path)) && (!f.method || f.method === method));
     if (fi >= 0) {
       const f = S.failures.splice(fi, 1)[0];

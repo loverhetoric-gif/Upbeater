@@ -17,6 +17,18 @@ export interface Env {
   GITHUB_APP_CLIENT_ID?: string;
   /** MCP に接続できる GitHub のアカウント（ログイン名か数値 ID をカンマ区切り） */
   ALLOWED_GITHUB_USERS?: string;
+  /** クラウド Runner（Cloud Run Jobs）。すべて揃った時だけ使う */
+  GCP_PROJECT?: string;
+  GCP_REGION?: string;
+  CLOUD_RUN_JOB?: string;
+  /** クラウド Runner に任せるラベル（カンマ区切り。既定 linux） */
+  CLOUD_RUNNER_LABELS?: string;
+  /** Hub 自身の URL（クラウド Runner に渡す） */
+  HUB_URL?: string;
+  /** テスト用：Google の API への接続口と URL */
+  GCP_API?: Fetcher;
+  GCP_TOKEN_URL?: string;
+  GCP_RUN_BASE?: string;
   /** マージの可否の判定を待つ間隔（ミリ秒。テストで短くする） */
   GITHUB_POLL_MS?: string;
 
@@ -28,6 +40,8 @@ export interface Env {
   GITHUB_APP_PRIVATE_KEY?: string;
   /** GitHub App の Client secret（MCP の OAuth） */
   GITHUB_APP_CLIENT_SECRET?: string;
+  /** クラウド Runner を起動するサービスアカウントの鍵（JSON） */
+  GCP_SERVICE_ACCOUNT_KEY?: string;
   GITHUB_TOKEN?: string;
   MANIFEST_SIGNING_KEYS?: string;
 }

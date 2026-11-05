@@ -123,3 +123,11 @@ LIFElive の main に `.upbeater/build.yml`・`deploy.yml` が入り、`.github/
 ### 残り
 
 - GitHub App の Client secret を作り、Secret `GITHUB_APP_CLIENT_SECRET` に入れる。`wrangler.jsonc` の `GITHUB_APP_CLIENT_ID` を App の Client ID にする。App の Callback URL に `https://upbeater-hub.twilight-star-9d9d.workers.dev/oauth/github/callback` を入れる。済めば claude.ai のコネクタに `https://upbeater-hub.twilight-star-9d9d.workers.dev/mcp` を足せる
+
+## 終わったこと：開発順序5「クラウド Runner」（コード）
+
+Hub（`src/cloud.ts`・テスト `test/cloud.test.ts`、計 103 件）、Runner（環境変数での起動・1 件で終わる）、`cloud-runner/Dockerfile`・`deploy.sh`。
+
+### 残り
+
+- GCP 側の用意（課金が発生する）：`sh cloud-runner/deploy.sh <課金が有効なプロジェクト>` を実行し、出た値を `hub/wrangler.jsonc` に入れて公開する。それまでは Linux のジョブは Mac の Runner が受け取る

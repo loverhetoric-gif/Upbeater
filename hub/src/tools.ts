@@ -360,9 +360,9 @@ export const TOOLS: Tool[] = [
       const r = await ctx.env.DB.prepare(
         `SELECT n.id AS runner_id, n.name, n.labels, n.created_at, n.last_seen_at, n.revoked_at,
                 (SELECT json_group_array(json_object('job_id', j.id, 'name', j.name)) FROM jobs j WHERE j.runner_id = n.id AND j.status = 'claimed') AS running
-         FROM runners n WHERE n.owner_id = ? ORDER BY n.name`,
+         FROM runners n WHERE n.owner_id = ? AND (n.ephemeral = 0 OR n.expires_at > ?) ORDER BY n.name`,
       )
-        .bind(ctx.owner_id)
+        .bind(ctx.owner_id, Date.now())
         .all<{ labels: string; running: string; last_seen_at: number | null }>();
       const now = Date.now();
       return {

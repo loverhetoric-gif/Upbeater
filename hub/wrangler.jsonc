@@ -7,6 +7,7 @@
 //   ADMIN_TOKEN             管理 API の暫定トークン（開発順序4で MCP に置き換える）
 //   GITHUB_APP_PRIVATE_KEY  GitHub App の秘密鍵（PEM）
 //   GITHUB_APP_CLIENT_SECRET MCP の OAuth（GitHub でのログイン）
+//   GCP_SERVICE_ACCOUNT_KEY クラウド Runner（Cloud Run Jobs）を起動するサービスアカウントの鍵（cloud-runner/deploy.sh が入れる）
 //   MANIFEST_SIGNING_KEYS   端末への配布のマニフェスト署名用の Ed25519 秘密鍵（開発順序6）
 {
   "$schema": "node_modules/wrangler/config-schema.json",
@@ -33,6 +34,12 @@
     // MCP に接続できる GitHub アカウント（ログイン名か数値 ID をカンマ区切り）
     "ALLOWED_GITHUB_USERS": "loverhetoric-gif",
     // GitHub App の Client ID（秘密情報ではない。空の間は MCP のログインが使えない）
-    "GITHUB_APP_CLIENT_ID": ""
+    "GITHUB_APP_CLIENT_ID": "",
+    // Hub 自身の URL（クラウド Runner に渡す）
+    "HUB_URL": "https://upbeater-hub.twilight-star-9d9d.workers.dev",
+    // クラウド Runner（cloud-runner/deploy.sh が出す値。空の間は使わない）
+    "GCP_PROJECT": "",
+    "GCP_REGION": "",
+    "CLOUD_RUN_JOB": ""
   }
 }

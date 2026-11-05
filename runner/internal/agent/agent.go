@@ -31,6 +31,8 @@ type Agent struct {
 	PollInterval time.Duration
 	// Once なら、ジョブを 1 件実行したら終わる（試験用）
 	Once bool
+	// OnceIdle は Once のとき、ジョブが来ないまま終わるまでの時間（既定 3 分。起動のもとのジョブが先に取り消された時など）
+	OnceIdle time.Duration
 
 	ws       *workspace.Manager
 	modeNote string
@@ -119,6 +121,11 @@ func (a *Agent) Run(ctx context.Context) error {
 
 	backoff := time.Second
 	lastRecover := time.Now()
+	started := time.Now()
+	idle := a.OnceIdle
+	if idle == 0 {
+		idle = 3 * time.Minute
+	}
 	for ctx.Err() == nil {
 		if time.Since(lastRecover) > time.Minute {
 			logship.Recover(ctx, a.Client, spoolDir)
@@ -147,6 +154,10 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 		backoff = time.Second
 		if j == nil {
+			if a.Once && time.Since(started) > idle {
+				a.Log.Printf("受け取るジョブがないため終わります")
+				return nil
+			}
 			sleep(ctx, jitter(a.PollInterval))
 			continue
 		}

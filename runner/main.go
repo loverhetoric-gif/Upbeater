@@ -2,6 +2,7 @@
 //
 //	upbeater-runner register --hub https://hub.example.com --code ABCD-EFGH [--name 名前] [--labels linux,large]
 //	upbeater-runner run                       常駐して Hub からジョブを取りに行く
+//	                                          （UPBEATER_RUNNER_TOKEN があればクラウド Runner として 1 件だけ実行して終わる）
 //	upbeater-runner service install|uninstall|print
 //	upbeater-runner version
 package main
@@ -125,8 +126,14 @@ func cmdRun(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	cfg, err := config.Load(*cfgPath)
+	// クラウド Runner：環境変数で渡された使い捨てのトークンで、1 件だけ実行して終わる
+	cfg, err := config.FromEnv()
 	if err != nil {
+		return err
+	}
+	if cfg != nil {
+		*once = true
+	} else if cfg, err = config.Load(*cfgPath); err != nil {
 		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
