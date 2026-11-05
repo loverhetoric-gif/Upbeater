@@ -3,11 +3,14 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -35,7 +38,32 @@ type Agent struct {
 
 // Paths は状態の置き場所。
 func Paths(stateDir string) (work, spool, lock string) {
-	return filepath.Join(stateDir, "work"), filepath.Join(stateDir, "spool"), filepath.Join(stateDir, "runner.lock")
+	return workBase(stateDir), filepath.Join(stateDir, "spool"), filepath.Join(stateDir, "runner.lock")
+}
+
+// workBase は作業場所の親。空白を含むパス（macOS の ~/Library/Application Support など）は、
+// パスを URL として扱う道具（file:// の %20）や引用符の無い台本を壊すので、空白の無い所に置く。
+// 置き場所ごとに名前を分け、同じ端末の別の Runner と混ざらないようにする。
+func workBase(stateDir string) string {
+	w := filepath.Join(stateDir, "work")
+	if !strings.ContainsAny(w, " \t") {
+		return w
+	}
+	sum := sha256.Sum256([]byte(stateDir))
+	name := "work-" + hex.EncodeToString(sum[:4])
+	var bases []string
+	if c, err := os.UserCacheDir(); err == nil {
+		bases = append(bases, filepath.Join(c, "upbeater-runner"))
+	}
+	if h, err := os.UserHomeDir(); err == nil {
+		bases = append(bases, filepath.Join(h, ".upbeater-runner"))
+	}
+	for _, b := range bases {
+		if p := filepath.Join(b, name); !strings.ContainsAny(p, " \t") {
+			return p
+		}
+	}
+	return w
 }
 
 // New は Agent を作る。

@@ -101,3 +101,16 @@ func TestSingleInstance(t *testing.T) {
 		t.Fatal("二つ目の Runner は起動できないべき")
 	}
 }
+
+// 空白を含む置き場所（macOS の Application Support）でも、作業場所のパスには空白を入れない
+func TestWorkBaseAvoidsSpaces(t *testing.T) {
+	plain := t.TempDir()
+	if got := workBase(plain); got != filepath.Join(plain, "work") {
+		t.Fatalf("空白の無い置き場所はそのまま使うべき：%s", got)
+	}
+	spaced := filepath.Join(t.TempDir(), "Application Support", "upbeater-runner")
+	a, b := workBase(spaced), workBase(spaced+"2")
+	if strings.ContainsAny(a, " \t") || a == b {
+		t.Fatalf("空白を避け、置き場所ごとに分けるべき：%s / %s", a, b)
+	}
+}

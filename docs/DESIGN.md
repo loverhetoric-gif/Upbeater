@@ -127,7 +127,7 @@ Upbeater 自身の検査・公開も Upbeater で行い、Actions は使わな�
 ## Runner の処理（開発順序2で実装）
 
 - 単一の実行ファイル（`runner/`、Go、外部の部品なし）。`register`（一回限りのコード → トークンを権限 600 の設定ファイルへ）・`run`（常駐）・`service install`（macOS は launchd、Linux は systemd のユーザー単位）
-- 作業場所：ジョブごとに `<状態>/work/<ジョブ>-<回>-<乱数>/{work,tmp,home}` を作り、終わったら消す。Linux の既定はコンテナ（docker・podman。作業場所を同じパスで入れ、利用者の uid で実行）、macOS の既定は専用の一時ディレクトリ。起動時に前の実行の残骸（作業場所・ラベル付きのコンテナ）を片付ける
+- 作業場所：ジョブごとに `<状態>/work/<ジョブ>-<回>-<乱数>/{work,tmp,home}` を作り、終わったら消す（`<状態>` のパスに空白があれば、空白の無いキャッシュの場所 `~/Library/Caches/upbeater-runner/work-<識別>` などに置く。file:// の %20 や引用符の無い台本が壊れるため）。Linux の既定はコンテナ（docker・podman。作業場所を同じパスで入れ、利用者の uid で実行）、macOS の既定は専用の一時ディレクトリ。起動時に前の実行の残骸（作業場所・ラベル付きのコンテナ）を片付ける
 - 取得：`repo.auth_header` は git の子プロセスの環境変数（`GIT_CONFIG_*`）にだけ渡し、`.git/config` にも手順の環境にも残さない。手順に `checkout` が無ければ最初に取得する
 - 手順：`run` は `bash -eo pipefail`（無ければ `sh -e`）。`if` は Hub と同じ式（`runner/internal/expr`）。`${{ secrets.X }}`・`${{ env.X }}` は台本の中では環境変数の参照に置き換え、値をファイルに書かない。`continue-on-error`・手順の `timeout`・`working-directory` に対応
 - 組み込み部品：`checkout`・`setup-*`（道具が入っていて版が合うかを確かめる。道具は Runner の端末・コンテナのイメージに入れておく。普段使いと違う版が要る時は `~/.upbeater/tools/<名前>/` に置くと、`install.sh` がその bin を Runner の PATH の先頭に足す）・`cache`・`upload-artifact`・`download-artifact`。`distribute` はファイルを Hub に送る（署名・通知は開発順序6）
