@@ -7,12 +7,14 @@
  * - GET  /v1/admin/runs/:id                   実行の状況（ジョブ・手順）
  * - POST /v1/admin/runs/:id/cancel|rerun      取り消し・失敗したジョブの再実行
  * - GET  /v1/admin/jobs/:id/logs              ログ（通番の順。秘密情報は伏せる）
+ * - POST /v1/admin/secret-forms               秘密情報の入力ページ（一回限り・30 分）を発行する
  */
 import { coordinatorCall, type EventOutcome } from "../coordinator";
 import { randomCode, sha256Hex, timingSafeEqual } from "../crypto";
 import type { Env, JobRow, RepoRow, RunRow } from "../env";
 import { bearer, HttpError, int, json, readJson, str } from "../http";
 import { putSecret } from "../secrets";
+import { createSecretForm } from "./secret-form";
 import { assembleLogs } from "./runner";
 
 const ID = /^[A-Za-z0-9:_-]{1,64}$/;
@@ -55,6 +57,12 @@ export async function handleAdmin(req: Request, env: Env, p: string): Promise<Re
     const value = str(b.value, "value", { max: 64 * 1024 });
     await putSecret(env, owner, repo, name, value);
     return json({ ok: true, name });
+  }
+  if (p === "/v1/admin/secret-forms" && m === "POST") {
+    const b = await readJson(req);
+    const owner = str(b.owner_id, "owner_id", { pattern: ID });
+    const repo = b.repo ? (await repoOf(env, owner, str(b.repo, "repo", { pattern: REPO }))).id : "";
+    return createSecretForm(env, new URL(req.url).origin, owner, repo, b.names);
   }
   if (p === "/v1/admin/secrets" && m === "GET") {
     const owner = str(new URL(req.url).searchParams.get("owner_id"), "owner_id", { pattern: ID });

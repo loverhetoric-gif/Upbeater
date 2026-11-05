@@ -6,6 +6,7 @@ import { parseRevoked, parseSigningKeys, publicKeys } from "./manifest";
 import { handleAdmin } from "./routes/admin";
 import { handleBlob } from "./routes/blobs";
 import { handleClaim, handleComplete, handleHeartbeat, handleLogs, handleRegisterRunner, handleStep } from "./routes/runner";
+import { handleSecretForm } from "./routes/secret-form";
 import { handleGitHubWebhook } from "./routes/webhook";
 import { runCron } from "./scheduled";
 
@@ -29,6 +30,8 @@ async function route(req: Request, env: Env): Promise<Response> {
   const b = /^\/v1\/runners\/jobs\/([0-9a-f-]{36})\/(artifacts|cache)\/([^/]+)$/.exec(p);
   if (b) return handleBlob(req, env, b[1]!, b[2] as "artifacts" | "cache", b[3]!);
   if (p.startsWith("/v1/admin/")) return handleAdmin(req, env, p);
+  const sf = /^\/secret-form\/([^/]+)$/.exec(p);
+  if (sf) return handleSecretForm(req, env, sf[1]!);
   if (p === "/v1/keys" && m === "GET") {
     const keys = parseSigningKeys(env.MANIFEST_SIGNING_KEYS);
     const revoked = parseRevoked(env.MANIFEST_REVOKED_GENERATIONS);
