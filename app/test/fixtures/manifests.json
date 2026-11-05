@@ -1,0 +1,50 @@
+{
+  "note": "Hub の signManifest で作ったテスト用のマニフェスト。秘密鍵は生成後に破棄しており、ここには公開鍵だけを置く",
+  "public_keys": {
+    "1": {
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "x": "y5xaHsQ07bfQvG9CFYx4ZqUNK8DWy7joPqg7w5IyhfA"
+    },
+    "2": {
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "x": "JnmAzFzIl0Z6jxD1oQqNteotcSmeCDJDDp1ImrHquaA"
+    },
+    "3": {
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "x": "EeXt2XCvubgRUvU_mD2udn3jz65P2VUgT0p7TmEGpUE"
+    }
+  },
+  "update_gen2_seq5": {
+    "payload": "eyJ2IjoxLCJhcHBfaWQiOiJhcHAxIiwib3MiOiJhbmRyb2lkIiwic2VxIjo1LCJjb21taXRfc2hhIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsInJlbGVhc2VfaWQiOiJyLTUiLCJzaGEyNTYiOiJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiIiwic2l6ZSI6MTIzNCwidXJsIjoiaHR0cHM6Ly9odWIudGVzdC92MS9hcnRpZmFjdHMvcj90PXgiLCJpc3N1ZWRfYXQiOjEsImV4cGlyZXNfYXQiOjQxMDI0NDQ4MDAwMDAsImluc3RhbGwiOnsicGFja2FnZSI6ImNvbS5leGFtcGxlLmFwcCJ9LCJrZXlfZ2VuZXJhdGlvbiI6Mn0",
+    "signature": "jS29nY01ricOtecGmULFjk8BkxkTh6jKcigFyEaY_JTKvyKCwsgzuGe44hkGMG6_NsLwb4qSlQVZEbyjqKsoCA",
+    "key_generation": 2
+  },
+  "update_gen1_seq5": {
+    "payload": "eyJ2IjoxLCJhcHBfaWQiOiJhcHAxIiwib3MiOiJhbmRyb2lkIiwic2VxIjo1LCJjb21taXRfc2hhIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsInJlbGVhc2VfaWQiOiJyLTUiLCJzaGEyNTYiOiJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiIiwic2l6ZSI6MTIzNCwidXJsIjoiaHR0cHM6Ly9odWIudGVzdC92MS9hcnRpZmFjdHMvcj90PXgiLCJpc3N1ZWRfYXQiOjEsImV4cGlyZXNfYXQiOjQxMDI0NDQ4MDAwMDAsImluc3RhbGwiOnsicGFja2FnZSI6ImNvbS5leGFtcGxlLmFwcCJ9LCJrZXlfZ2VuZXJhdGlvbiI6MX0",
+    "signature": "rNp2an_b-7tPJK5qWeXQfxth_6XRNneOO9aSx4Pk6fcq7Buj45vmKXiFsP-60Af_57I-CbfKr3uREAkEZgicAg",
+    "key_generation": 1
+  },
+  "update_gen3_seq6": {
+    "payload": "eyJ2IjoxLCJhcHBfaWQiOiJhcHAxIiwib3MiOiJhbmRyb2lkIiwic2VxIjo2LCJjb21taXRfc2hhIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsInJlbGVhc2VfaWQiOiJyLTYiLCJzaGEyNTYiOiJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiIiwic2l6ZSI6MTIzNCwidXJsIjoiaHR0cHM6Ly9odWIudGVzdC92MS9hcnRpZmFjdHMvcj90PXgiLCJpc3N1ZWRfYXQiOjEsImV4cGlyZXNfYXQiOjQxMDI0NDQ4MDAwMDAsImluc3RhbGwiOnsicGFja2FnZSI6ImNvbS5leGFtcGxlLmFwcCJ9LCJrZXlfZ2VuZXJhdGlvbiI6M30",
+    "signature": "C6CObjFBvcUHboYHiJGkBLz7M7zizfzeI8p-RV93lDsW8iJrsx3U7viVqo8vOMOdWa5otzWtF6n6i5J4x_1kAw",
+    "key_generation": 3
+  },
+  "old_gen2_seq3": {
+    "payload": "eyJ2IjoxLCJhcHBfaWQiOiJhcHAxIiwib3MiOiJhbmRyb2lkIiwic2VxIjozLCJjb21taXRfc2hhIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsInJlbGVhc2VfaWQiOiJyLTMiLCJzaGEyNTYiOiJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiIiwic2l6ZSI6MTIzNCwidXJsIjoiaHR0cHM6Ly9odWIudGVzdC92MS9hcnRpZmFjdHMvcj90PXgiLCJpc3N1ZWRfYXQiOjEsImV4cGlyZXNfYXQiOjQxMDI0NDQ4MDAwMDAsImluc3RhbGwiOnsicGFja2FnZSI6ImNvbS5leGFtcGxlLmFwcCJ9LCJrZXlfZ2VuZXJhdGlvbiI6Mn0",
+    "signature": "IMKQqfwpACnBJeqiieFxNudjYjwdiF8uaEEfp2A1XtBRH-VvvLQMGeYsmTydKNb4ji2VFSLEuk8rmks8ZVYnDg",
+    "key_generation": 2
+  },
+  "rollback_gen2_seq3": {
+    "payload": "eyJ2IjoxLCJhcHBfaWQiOiJhcHAxIiwib3MiOiJhbmRyb2lkIiwic2VxIjozLCJjb21taXRfc2hhIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsInJlbGVhc2VfaWQiOiJyLTMiLCJzaGEyNTYiOiJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiIiwic2l6ZSI6MTIzNCwidXJsIjoiaHR0cHM6Ly9odWIudGVzdC92MS9hcnRpZmFjdHMvcj90PXgiLCJpc3N1ZWRfYXQiOjEsImV4cGlyZXNfYXQiOjQxMDI0NDQ4MDAwMDAsImluc3RhbGwiOnsicGFja2FnZSI6ImNvbS5leGFtcGxlLmFwcCJ9LCJyb2xsYmFjayI6eyJ0b19zZXEiOjMsInJlYXNvbiI6InBpbm5lZCJ9LCJrZXlfZ2VuZXJhdGlvbiI6Mn0",
+    "signature": "8SiCZo72VOvoJ4_fj2bm6JYTRVGQ4HEomzcWMCOM8sjn04lpqdw8-pmwlmMej5LyW5sahzxGzSRJ1K2G07kODA",
+    "key_generation": 2
+  },
+  "expired_gen2_seq7": {
+    "payload": "eyJ2IjoxLCJhcHBfaWQiOiJhcHAxIiwib3MiOiJhbmRyb2lkIiwic2VxIjo3LCJjb21taXRfc2hhIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsInJlbGVhc2VfaWQiOiJyLTciLCJzaGEyNTYiOiJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiIiwic2l6ZSI6MTIzNCwidXJsIjoiaHR0cHM6Ly9odWIudGVzdC92MS9hcnRpZmFjdHMvcj90PXgiLCJpc3N1ZWRfYXQiOjEsImV4cGlyZXNfYXQiOjEwMDAsImluc3RhbGwiOnsicGFja2FnZSI6ImNvbS5leGFtcGxlLmFwcCJ9LCJrZXlfZ2VuZXJhdGlvbiI6Mn0",
+    "signature": "DRTCgGGoHQnMHjwVnx3Sdmig2KqtJgOjmd2sNxZqOjXIb4x2Z2BdWKmkMZVRsfk_j5Y1EOLY2ZY4PimC0GefAA",
+    "key_generation": 2
+  }
+}

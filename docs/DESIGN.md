@@ -114,6 +114,14 @@ Hub の公開は Cloudflare 側（Workers Builds または wrangler）で行い�
 - 失敗は段階（preflight・fetch・build・artifact・upload・interrupted）・理由・末尾ログ（秘密情報を伏せる）として記録し、MCP の `list_builds` で取得できる。失敗した版は配信しない（端末は現行版のまま）
 - Builder の認証は `create_builder` で発行するトークン（Hub はハッシュのみ保存）
 
+## 端末アプリ（開発順序4で Android・macOS を実装）
+
+- 照合は起動時・復帰時・15 分ごと（`GET /v1/devices/apps` で対象アプリを知り、`POST /v1/devices/check` で照合する）
+- マニフェストの公開鍵はアプリに埋め込む（`--dart-define=UPBEATER_PUBLIC_KEYS`）。Hub が知らせる失効は加えるだけで、Hub から新しい鍵は受け入れない（新しい世代の鍵はアプリの更新で届ける）
+- 導入の設定（`install_steps[os].install`：パッケージ名・バンドル名・バンドル ID・使用中の扱い・起動確認の時間）はマニフェストに含めて署名し、導入先のすり替えを防ぐ
+- 成果物は `<通番>-<SHA-256 の先頭>.bin` として保持し、直近 2 つの版を残す。同じ版で検証に 2 回失敗したら、その版は試さない
+- 状態はアプリの保存領域の JSON に、端末トークンは OS の安全な保管場所（Android の Keystore・macOS のキーチェーン）に置く
+
 ## OS ごとのインストール
 
 - **Android**：PackageInstaller のセッションで導入。Android 12 以降、Upbeater がそのアプリの導入元であれば確認なしで更新できる（`USER_ACTION_NOT_REQUIRED`）。初回のみ「不明なアプリのインストール」の許可が必要
