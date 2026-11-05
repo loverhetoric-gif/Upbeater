@@ -1,9 +1,10 @@
 /**
  * GitHub への結果表示（Checks）。待ち行列に積み、間隔を広げながら再試行する。
  * 表示に失敗しても実行は止めない。同じ対象の古い表示は新しいもので置き換える（状態は常に最新だけを送る）。
+ * GitHub App に Checks の権限が無い（403）時は、コミットの状態（Commit statuses）で代わりに表示する。
  */
 import type { Env, RepoRow } from "./env";
-import { createGitHubClient, GitHubError, parseRepo, type CheckRunInput, type GitHubClient } from "./github";
+import { createGitHubClient, GitHubError, parseRepo, toCommitStatus, type CheckRunInput, type GitHubClient } from "./github";
 import { recordOperation } from "./operations";
 
 export const CHECK_MAX_ATTEMPTS = 12;
@@ -64,7 +65,31 @@ export async function flushChecks(env: Env, opts: { gh?: GitHubClient; now?: num
       // 送っている間に新しい表示が積まれていれば、それは残す
       await env.DB.prepare("DELETE FROM check_updates WHERE id = ?").bind(u.id).run();
       sent++;
-    } catch (e) {
+    } catch (e0) {
+      let e = e0;
+      if (e0 instanceof GitHubError && e0.status === 403 && !e0.retryable) {
+        try {
+          await gh.setCommitStatus(parseRepo(repo.full_name), payload.head_sha, toCommitStatus(payload));
+          await env.DB.prepare("DELETE FROM check_updates WHERE id = ?").bind(u.id).run();
+          // 権限の不足は人の判断が要るので、対象ごとに 1 度だけ記録する（完了の時）
+          if (payload.status === "completed") {
+            await recordOperation(env, {
+              owner_id: u.owner_id,
+              repo_id: u.repo_id,
+              kind: "checks",
+              stage: "report",
+              status: "ok",
+              reason: "GitHub App に Checks の権限が無いため、コミットの状態で表示しました（Checks の読み書きを許可すると、詳しい表示になります）",
+              needs_human: true,
+              detail: { target: u.target, fallback: "statuses" },
+            });
+          }
+          sent++;
+          continue;
+        } catch (e1) {
+          e = e1;
+        }
+      }
       failed++;
       const attempts = u.attempts + 1;
       const retryable = !(e instanceof GitHubError) || e.retryable;

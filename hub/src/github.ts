@@ -69,6 +69,23 @@ export interface GitHubClient {
   listWorkflowFiles(repo: RepoRef, sha: string): Promise<WorkflowFile[]>;
   createCheckRun(repo: RepoRef, input: CheckRunInput): Promise<number>;
   updateCheckRun(repo: RepoRef, id: number, input: CheckRunInput): Promise<void>;
+  /** コミットの状態（Checks の権限が無い時の代わり。Commit statuses の権限で書ける） */
+  setCommitStatus(repo: RepoRef, sha: string, input: CommitStatusInput): Promise<void>;
+}
+
+export interface CommitStatusInput {
+  state: "pending" | "success" | "failure" | "error";
+  context: string;
+  description: string;
+  target_url?: string;
+}
+
+/** Checks の表示を、コミットの状態の形にする */
+export function toCommitStatus(c: CheckRunInput): CommitStatusInput {
+  const state: CommitStatusInput["state"] =
+    c.status !== "completed" ? "pending" : c.conclusion === "failure" ? "failure" : c.conclusion === "cancelled" ? "error" : "success";
+  const desc = (c.output?.title ?? (c.status === "completed" ? (c.conclusion ?? "") : c.status === "queued" ? "待っています" : "実行中")).replace(/\s+/g, " ");
+  return { state, context: `Upbeater / ${c.name}`.slice(0, 255), description: [...desc].slice(0, 140).join(""), ...(c.details_url ? { target_url: c.details_url } : {}) };
 }
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -115,6 +132,10 @@ export class HttpGitHubClient implements GitHubClient {
     const id = ((await res.json()) as { id?: unknown }).id;
     if (typeof id !== "number") throw new GitHubError("GitHub の応答の形式が想定外です", res.status, true);
     return id;
+  }
+
+  async setCommitStatus(repo: RepoRef, sha: string, input: CommitStatusInput): Promise<void> {
+    await this.request(repo, `${this.base(repo)}/statuses/${enc(sha)}`, { method: "POST", body: input });
   }
 
   async updateCheckRun(repo: RepoRef, id: number, input: CheckRunInput): Promise<void> {
