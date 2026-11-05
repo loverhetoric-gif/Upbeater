@@ -71,11 +71,12 @@ Upbeater は GitHub Actions の代替（`docs/DESIGN.md`）。開発順序は DE
 | --- | --- |
 | GitHub App の作成 | 済み：`upbeater-loverhetoric`（App ID 5623766、`hub/wrangler.jsonc` に記載）。権限：Checks・Contents・Pull requests・Commit statuses は読み書き、Metadata は読み取り。入れられる先はこのアカウントのみ |
 | 秘密鍵 | 発行済み（利用者の PC に .pem で保管）。Hub の公開時に LININGS. 経由で Secret `GITHUB_APP_PRIVATE_KEY` に入れる |
-| Webhook | 未設定（無効）。Hub の公開後に送り先 `https://<Hub>/webhook/github`、シークレット（`WEBHOOK_SECRET` と同じ値）、合図（push・pull_request・delete）を設定して有効にする |
-| App のインストール | 未（対象のリポジトリに入れる） |
+| Webhook | 済み：送り先とシークレットを設定。合図（push・pull_request・delete）の選択は利用者が GitHub の画面で行う |
+| App のインストール・リポジトリの登録 | 未：GitHub の画面でインストールし、`node scripts/admin.mjs repo <owner/name>` で Hub に登録する |
+| Runner | 未：利用者の Mac で組み立てて登録する（`runner/README.md`） |
 | D1 | 作成済み：`upbeater`（APAC、ID は `hub/wrangler.jsonc`）。スキーマは公開の手順で適用する |
-| R2 | 未：アカウントで R2 が有効になっていない。Cloudflare の画面で有効にする必要がある |
-| 公開・Secret の投入・Webhook の設定 | `hub/scripts/deploy.mjs` を利用者の PC で実行する（秘密情報はその PC で生成・投入し、チャットに出さない） |
+| R2 | 済み：`upbeater-blobs` |
+| 公開・Secret の投入・Webhook の設定 | 済み：`https://upbeater-hub.twilight-star-9d9d.workers.dev`（`hub/scripts/deploy.mjs` を利用者の Mac で実行。秘密情報は `~/.upbeater/hub-secrets.json`） |
 
 ## 残り（hub）
 
