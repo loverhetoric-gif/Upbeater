@@ -140,3 +140,11 @@ Hub（`src/cloud.ts`・テスト `test/cloud.test.ts`、計 103 件）、Runner�
 
 - 本番の署名鍵（Secret `MANIFEST_SIGNING_KEYS`）を入れる。入れるまで、照合は「署名が設定されていません」（503）を返す
 - 端末アプリの組み立てに公開鍵を埋め込む（`--dart-define UPBEATER_PUBLIC_KEYS='{"1":"<x>"}'`。値は `GET /v1/keys`）。Linux のアプリ（AppImage）は未実装
+
+## 終わったこと：iPhone へのワイヤレス導入（install-ios）
+
+Runner の `install-ios`（`runner/internal/job/ios.go`）と Hub の定義の検証。実機（iPhone 17 Pro Max）とは Wi-Fi 越しにつながることを確かめた。
+
+### 残り
+
+- Xcode に Apple ID（無料）を入れる（Xcode → Settings → Accounts）。いまは空のため、新しいアプリの署名が作れない。入れたら、試験のアプリを組み立てて実機に入れて確かめる

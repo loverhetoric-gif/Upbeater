@@ -54,6 +54,8 @@ func (r *runner) builtin(ctx context.Context, name string, with, env map[string]
 			n = "artifact"
 		}
 		return code(r.uploadArtifact(ctx, n, lines(with["path"])))
+	case "install-ios":
+		return r.installIOS(ctx, with)
 	case "download-artifact":
 		n := with["name"]
 		if n == "" {
