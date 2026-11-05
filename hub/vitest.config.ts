@@ -1,6 +1,6 @@
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-workers";
 import { readFileSync } from "node:fs";
-import { webcrypto } from "node:crypto";
+import { generateKeyPairSync, webcrypto } from "node:crypto";
 import { defineConfig } from "vitest/config";
 
 /** テストのたびに使い捨ての Ed25519 鍵を作る（実際の秘密鍵はリポジトリに置かない） */
@@ -12,6 +12,12 @@ async function testKey(gen: number) {
 export default defineConfig(async () => {
   const migrations = await readD1Migrations("./migrations");
   const keys = [await testKey(1), await testKey(2), await testKey(3)];
+  // GitHub App の秘密鍵も使い捨て。GitHub が配る形式（PKCS#1）で渡し、変換も確かめる
+  const app = generateKeyPairSync("rsa", {
+    modulusLength: 2048,
+    privateKeyEncoding: { type: "pkcs1", format: "pem" },
+    publicKeyEncoding: { type: "spki", format: "jwk" as never },
+  }) as unknown as { privateKey: string; publicKey: JsonWebKey };
   return {
     plugins: [
       cloudflareTest({
@@ -26,6 +32,14 @@ export default defineConfig(async () => {
             GITHUB_API_BASE: "https://github-mock.test",
             MANIFEST_SIGNING_KEYS: JSON.stringify({ active: 2, keys: keys.slice(0, 2) }),
             TEST_ALL_SIGNING_KEYS: JSON.stringify(keys),
+            GITHUB_APP_ID: "12345",
+            GITHUB_APP_PRIVATE_KEY: app.privateKey,
+            TEST_APP_PUBLIC_JWK: JSON.stringify(app.publicKey),
+            GITHUB_APP_CLIENT_ID: "Iv1.test-client",
+            GITHUB_APP_CLIENT_SECRET: "test-github-client-secret",
+            GITHUB_WEB_BASE: "https://github-mock.test",
+            ALLOWED_GITHUB_USERS: "allowed-user,424242",
+            GITHUB_POLL_MS: "5",
           },
           serviceBindings: { GITHUB_API: "github-mock" },
           workers: [

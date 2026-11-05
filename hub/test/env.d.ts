@@ -6,6 +6,7 @@ declare global {
     interface Env extends HubEnv {
       TEST_MIGRATIONS: D1Migration[];
       TEST_ALL_SIGNING_KEYS: string;
+      TEST_APP_PUBLIC_JWK: string;
     }
   }
 }

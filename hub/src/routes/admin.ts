@@ -44,6 +44,7 @@ export async function handleCreateApp(req: Request, env: Env): Promise<Response>
         `INSERT INTO apps (id, owner_id, name, repo_full_name, branch, kind, target_os, install_steps, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(id, owner, name, repo, branch, kind, JSON.stringify([...new Set(os)]), JSON.stringify(steps), now, now),
+      env.DB.prepare("INSERT OR IGNORE INTO repo_allowlist (owner_id, repo_full_name, created_at) VALUES (?, ?, ?)").bind(owner, repo, now),
       operationStatement(env, { owner_id: owner, app_id: id, kind: "app", stage: "register", status: "ok" }, now),
     ]);
   } catch (e) {

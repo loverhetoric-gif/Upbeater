@@ -14,8 +14,19 @@ export interface Env {
   DOWNLOAD_TOKEN_SECRET?: string;
   ADMIN_TOKEN?: string;
   GITHUB_TOKEN?: string;
+  GITHUB_APP_PRIVATE_KEY?: string;
+  /** GitHub App のユーザー認証（MCP の OAuth で利用者を確かめる） */
+  GITHUB_APP_CLIENT_SECRET?: string;
 
   // 設定値
+  GITHUB_APP_ID?: string;
+  GITHUB_APP_CLIENT_ID?: string;
+  /** GitHub の Web 側（OAuth の画面・トークン交換） */
+  GITHUB_WEB_BASE?: string;
+  /** MCP を使える GitHub アカウント（ログイン名または数値 ID、カンマ区切り）。空なら誰も使えない */
+  ALLOWED_GITHUB_USERS?: string;
+  /** マージ可否の再確認の間隔（ミリ秒） */
+  GITHUB_POLL_MS?: string;
   MANIFEST_REVOKED_GENERATIONS?: string;
   ARTIFACT_URL_TTL_SECONDS?: string;
 }
