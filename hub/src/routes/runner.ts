@@ -30,7 +30,7 @@ interface RunnerRow {
   labels: string;
 }
 
-async function authRunner(req: Request, env: Env): Promise<RunnerRow> {
+export async function authRunner(req: Request, env: Env): Promise<RunnerRow> {
   const t = bearer(req);
   if (!t || !t.startsWith(RUNNER_TOKEN_PREFIX)) throw new HttpError(401, "unauthorized");
   const r = await env.DB.prepare("SELECT id, owner_id, name, labels FROM runners WHERE token_hash = ? AND revoked_at IS NULL").bind(await sha256Hex(t)).first<RunnerRow>();
@@ -39,7 +39,7 @@ async function authRunner(req: Request, env: Env): Promise<RunnerRow> {
 }
 
 /** このジョブの現在の実行であることを確かめる（二重実行の防止） */
-async function authJob(req: Request, env: Env, runner: RunnerRow, id: string, allowFinished = false): Promise<JobRow> {
+export async function authJob(req: Request, env: Env, runner: RunnerRow, id: string, allowFinished = false): Promise<JobRow> {
   const job = await env.DB.prepare("SELECT * FROM jobs WHERE id = ? AND owner_id = ?").bind(id, runner.owner_id).first<JobRow>();
   if (!job) throw new HttpError(404, "job_not_found");
   const token = req.headers.get("x-upbeater-job-token") ?? "";

@@ -37,14 +37,32 @@ Upbeater は GitHub Actions の代替（`docs/DESIGN.md`）。開発順序は DE
 | 定期実行の取りこぼし（一度だけ補う） | `test/checks-cron.test.ts` |
 | Hub の停止中の Webhook（GitHub の再送・定期照合） | `test/webhook.test.ts`（受け付け失敗時は記録を消して再送に任せる）・`test/checks-cron.test.ts`（照合） |
 | 同じジョブの二重実行（ジョブトークンで排他） | `test/runner.test.ts` |
-| 作業場所の汚染 | Runner 側（開発順序2） |
+| 作業場所の汚染 | Runner 側：`runner/internal/job`・`workspace`・`archive`（開発順序2） |
 
 **RESILIENCE.md（GitHub と Hub）**：重複・順序の入れ替わり（`webhook.test.ts`）、取りこぼし（`checks-cron.test.ts`）、強制プッシュ（`webhook.test.ts`）、連続した更新（concurrency：`runs.test.ts`）、GitHub の障害・回数制限（`checks-cron.test.ts`）、署名用の鍵の世代交代（`manifest.test.ts`）。
+
+## 終わったこと：開発順序2「runner」
+
+`cd runner && go vet ./... && go test -race ./...` がすべて通る（2 回繰り返して安定）。macOS（arm64・amd64）・Linux（arm64・amd64）向けにビルドできる。Hub は成果物・キャッシュの API を足し、`npm test` で 55 件が通る。
+
+| 項目 | 実装 |
+| --- | --- |
+| 実行ファイル | `runner/main.go`：`register`・`run`・`service install`・`uninstall`・`print`・`version`。外部の部品なし |
+| 設定 | `internal/config`：権限 600・ディレクトリ 700、一時ファイルから置き換え。緩い権限は読む時に直す。Hub の URL は https に限る（localhost を除く） |
+| 作業場所 | `internal/workspace`：Linux はコンテナ（uid を合わせ、同じパスで入れる）、macOS は一時ディレクトリ。起動時に残骸を片付ける |
+| 取得 | `internal/job/builtins.go`：`repo.auth_header` は git の環境変数だけに渡す。コミットを直接取れなければブランチから |
+| 手順 | `internal/job`：`run`・`if`（`internal/expr`、Hub と同じ式）・`${{ }}` の置き換え・`continue-on-error`・手順の `timeout`・組み込み部品・`distribute` |
+| 子プロセス | `internal/proc`：プロセスグループ＋環境変数の印で、setsid で抜けたものまで止める |
+| ログ | `internal/mask`（Hub と同じ変形・境目で分かれた値）→ `internal/logship`（ディスクに保持・`missing` の再送・次の起動で送る） |
+| 常駐 | `internal/agent`（取りに行く間隔・Hub の停止中は間隔を広げて待つ・二重起動の防止）、`internal/service`（launchd・systemd） |
+| Hub | `hub/src/routes/blobs.ts`：成果物・キャッシュの保存と取り出し（R2 が SHA-256 を照合、フォークはキャッシュを保存できない）。`test/blobs.test.ts` |
+
+受け入れ条件の Runner 側（作業場所の汚染・時間超過での子プロセスの終了・ログの保持と再送）は `runner/README.md` の表のテストで確かめている。旧 `builder/`（Node 製）は削除した。
 
 ## 旧設計からの変更
 
 - hub は「アプリ単位の配布」の旧設計から、Actions の代替の設計に作り直した。旧実装（MCP・OAuth・GitHub 操作・端末への配布の API）は git の履歴（コミット 44c1af8）に残っており、開発順序4（MCP と GitHub 操作）・6（端末への配布）で新しい表に合わせて移植する。マニフェスト署名（`src/manifest.ts`）と GitHub App 認証（`src/github-app.ts`）はそのまま残した
-- `builder/`（Node 製）は旧設計の Hub API 向けで、新しい Hub とは接続できない。開発順序2の Go 製 Runner に置き換えたら削除する
+- `builder/`（Node 製）は開発順序2の Go 製 Runner に置き換えて削除した
 - `app/` は開発順序6で新しい Hub に合わせる
 
 ## 公開の準備の進み具合
@@ -62,16 +80,19 @@ Upbeater は GitHub Actions の代替（`docs/DESIGN.md`）。開発順序は DE
 ## 残り（hub）
 
 - 管理 API は暫定（`ADMIN_TOKEN`）。開発順序4で MCP（OAuth）に置き換える
-- 成果物（artifacts）とキャッシュ（cache）の R2 への保存・取得の API（定義の解析と受け渡しは実装済み。Runner と合わせて開発順序2で）
+- 成果物・キャッシュの古いものの削除（期限・容量の上限）
 - `linux` のジョブをクラウド Runner へ回す仕組み（開発順序5）
 - 失敗の通知（いまは operations の `needs_human` に記録）
-- 本番公開（利用者の操作が要る）：GitHub App の作成、D1・R2 の作成、Secret の投入（LININGS. 経由）、`wrangler deploy`
+- 本番公開（利用者の操作が要る）：R2 を Cloudflare の画面で有効にし、`hub/scripts/deploy.mjs` を利用者の PC で実行する。その後、GitHub App の画面で Webhook を Active にして合図（push・pull_request・delete）を選び、対象のリポジトリにインストールする
 
-## 次にやること：開発順序2「runner」（Go、macOS・Linux）
+## 残り（runner）
 
-1. `runner/`：単一の実行ファイル（Go）。`go test` で確かめる
-2. 登録（`POST /v1/runners/register`）→ トークンを権限 600 のファイルに保存
-3. 受け取り（`/claim`）→ 使い捨ての作業場所（Linux はコンテナ、macOS は一時ディレクトリ）→ `repo.auth_header` を git にだけ渡して取得 → 手順の実行（`run`・組み込み部品・`distribute`）
-4. 心拍（`heartbeat_interval_ms` ごと。`continue: false` なら子プロセスまで止める）、ログの逐次送信（通番つき。応答の `missing` を再送。送れない間は手元に保持）、手順の状態、終了の報告
-5. 秘密情報は環境変数で渡し、Runner でもログを伏せる（Hub と同じ変形を含む）
-6. 常駐（launchd・systemd）。RESILIENCE-JOBS.md の Runner 側の局面（作業場所の汚染・時間超過での子プロセスの終了・ログの保持と再送）を故障テストで確かめる
+- 実機の Hub（`wrangler dev`）と GitHub App を使った通しの確認（本番公開と合わせて）
+- 実行ファイルの配布と自己更新（署名と SHA-256 を検証してから差し替える。開発順序6の配布の仕組みを使う）
+- `setup-*` で道具を自動で入れること（いまは版の確認のみ）
+
+## 次にやること：開発順序3「移行ツール ＋ LIFElive の移行で実地検証」
+
+1. `.github/workflows/*.yml` を読み、`.upbeater/*.yml` に変換する（`hub/src/workflow/` の部品を使う）。変換できない部分を行番号つきで一覧にする
+2. LIFElive の `build.yml`・`deploy.yml` を変換し、Runner で実際に動かして結果を GitHub に表示する
+3. Actions 側を止める手順を用意する（止めるのは利用者の確認の後）
