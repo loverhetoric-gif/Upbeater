@@ -21,8 +21,8 @@ GitHub 上のリポジトリの main が更新されたら、登録したすべ�
 各端末が GitHub を見に行くのではなく、更新の瞬間に Hub から各端末へ通知して届ける。
 
 1. GitHub → Webhook（push イベント、main のみ）→ Hub
-2. Hub → Builder（Mac 上）へビルド指示（`build` の場合のみ）
-3. Builder → `git fetch` → 対象 OS ごとにビルド → 成果物を R2 へ → Hub へ完了報告（版＝コミット SHA、SHA-256、サイズ）
+2. Hub → ビルド指示を待ち行列に積む（`build`・`direct` の場合。アプリごとに最新の版だけを残す）。Builder（Mac 上）が Hub に取りに来る
+3. Builder → `git fetch` → 対象 OS ごとにビルド → 成果物を Hub 経由で R2 へ（Hub が SHA-256 を照合）→ 完了
 4. Hub → 各端末へ更新通知（Android：FCM、iOS・macOS：APNs、Linux：WebSocket）
 5. 端末の Upbeater → マニフェスト取得・署名検証 → 成果物取得・SHA-256 照合 → インストール → 結果を Hub へ報告
 
@@ -103,6 +103,16 @@ Hub の公開は Cloudflare 側（Workers Builds または wrangler）で行い�
 - 成果物：SHA-256 を照合。R2 からの取得は有効期限の短い署名付き URL
 - 端末認証：登録時に発行するトークン。Hub はハッシュだけを保存
 - 秘密情報（Webhook のシークレット、署名用の秘密鍵、GitHub App の秘密鍵、APNs・FCM の資格情報）は Worker の Secret に置き、LININGS. 経由で投入する。リポジトリ・ログ・チャットに出さない
+
+## Builder（開発順序3で実装）
+
+- 取りに行く方式：Builder が `POST /v1/builder/claim` で指示を受け取る。Mac が停止・スリープしていても指示は Hub に残り、復帰後は各アプリの最新版だけを受け取る
+- 指示は配布物（アプリ × 通番 × OS）ごとに 1 件。新しい版ができると古い版の指示は取り消し、実行中の Builder には生存の連絡（30 秒ごと）の応答で中断を指示する
+- 連絡が 10 分途絶えた指示は待ち行列に戻す（3 回まで。超えたら失敗として記録）
+- 手順はアプリの `install_steps`（OS ごとに `requires`・`build`・`artifact`・`timeout_minutes`）で与え、Builder 本体にアプリ固有の処理は持たない
+- 取得用のトークン（GitHub App のインストールトークン）は指示の応答でだけ渡し、Hub には保存しない。Builder は git の取得にだけ使い、ビルド手順の環境には渡さない
+- 失敗は段階（preflight・fetch・build・artifact・upload・interrupted）・理由・末尾ログ（秘密情報を伏せる）として記録し、MCP の `list_builds` で取得できる。失敗した版は配信しない（端末は現行版のまま）
+- Builder の認証は `create_builder` で発行するトークン（Hub はハッシュのみ保存）
 
 ## OS ごとのインストール
 

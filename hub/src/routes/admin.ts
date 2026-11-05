@@ -7,12 +7,12 @@
 import { randomCode, sha256Hex, timingSafeEqual } from "../crypto";
 import { APP_KINDS, SUPPORTED_OS, type AppRow, type Env, type ReleaseRow } from "../env";
 import { bearer, HttpError, int, json, readJson, str } from "../http";
+import { storeArtifact } from "../artifact-store";
 import { operationStatement } from "../operations";
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
 const REPO = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
 const BRANCH = /^(?!\/)(?!.*\.\.)(?!.*\/\/)[A-Za-z0-9._\/-]{1,200}(?<!\/)$/;
-const MAX_ARTIFACT = 100 * 1024 * 1024;
 
 export async function requireAdmin(req: Request, env: Env): Promise<void> {
   const token = bearer(req);
@@ -76,35 +76,8 @@ export async function handlePutArtifact(req: Request, env: Env, appId: string, s
     .bind(appId, seq, os)
     .first<ReleaseRow>();
   if (!release) throw new HttpError(404, "release_not_found");
-  // 取り消された古い版・配信停止中の版は上げない
-  if (release.status === "cancelled" || release.status === "halted") throw new HttpError(409, "release_not_accepting", release.status);
   if (release.status === "ready") return json({ id: release.id, status: "ready", sha256: release.sha256, size: release.size });
 
-  const len = Number(req.headers.get("content-length") ?? "0");
-  if (len > MAX_ARTIFACT) throw new HttpError(413, "payload_too_large");
-  const data = await req.arrayBuffer();
-  if (data.byteLength === 0 || data.byteLength > MAX_ARTIFACT) throw new HttpError(400, "invalid_artifact");
-  const sha256 = await sha256Hex(data);
-  const expected = req.headers.get("x-upbeater-sha256");
-  if (expected && expected.toLowerCase() !== sha256) throw new HttpError(400, "sha256_mismatch");
-
-  const key = `${app.owner_id}/${app.id}/${seq}/${os}/${release.id}`;
-  await env.ARTIFACTS.put(key, data, { sha256, httpMetadata: { contentType: "application/octet-stream" } });
-  const now = Date.now();
-  // 上げている間に新しい版で取り消された場合は ready にしない
-  const results = await env.DB.batch([
-    env.DB.prepare(
-      "UPDATE releases SET r2_key = ?, sha256 = ?, size = ?, status = 'ready', updated_at = ? WHERE id = ? AND status IN ('pending', 'failed')",
-    ).bind(key, sha256, data.byteLength, now, release.id),
-    operationStatement(
-      env,
-      { owner_id: app.owner_id, app_id: app.id, kind: "release", stage: "artifact_ready", status: "ok", detail: { seq, os, sha256, size: data.byteLength } },
-      now,
-    ),
-  ]);
-  if ((results[0]?.meta.changes ?? 0) !== 1) {
-    await env.ARTIFACTS.delete(key);
-    throw new HttpError(409, "release_not_accepting");
-  }
-  return json({ id: release.id, status: "ready", sha256, size: data.byteLength }, 201);
+  const stored = await storeArtifact(env, req, release, { expectedSha256: req.headers.get("x-upbeater-sha256") });
+  return json({ id: release.id, status: "ready", sha256: stored.sha256, size: stored.size }, 201);
 }

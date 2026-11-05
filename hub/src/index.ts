@@ -17,6 +17,7 @@ import {
 } from "./oauth";
 import { handleCreateApp, handleCreateRegistrationCode, handlePutArtifact, requireAdmin } from "./routes/admin";
 import { handleArtifact } from "./routes/artifacts";
+import { handleArtifactUpload, handleClaim, handleFail, handleHeartbeat, reclaimExpired } from "./routes/builder";
 import { handleCheck, handleRegister, handleReport } from "./routes/devices";
 import { handleGitHubWebhook } from "./routes/webhook";
 
@@ -51,6 +52,14 @@ async function route(req: Request, env: Env): Promise<Response> {
   if (p === "/v1/devices/register" && m === "POST") return handleRegister(req, env);
   if (p === "/v1/devices/check" && m === "POST") return handleCheck(req, env, url.origin);
   if (p === "/v1/devices/report" && m === "POST") return handleReport(req, env);
+
+  if (p === "/v1/builder/claim" && m === "POST") return handleClaim(req, env);
+  const bj = /^\/v1\/builder\/jobs\/([0-9a-f-]{36})\/(heartbeat|artifact|fail)$/.exec(p);
+  if (bj) {
+    if (bj[2] === "heartbeat" && m === "POST") return handleHeartbeat(req, env, bj[1]!);
+    if (bj[2] === "artifact" && m === "PUT") return handleArtifactUpload(req, env, bj[1]!);
+    if (bj[2] === "fail" && m === "POST") return handleFail(req, env, bj[1]!);
+  }
 
   const art = /^\/v1\/artifacts\/([0-9a-f-]{36})$/.exec(p);
   if (art && (m === "GET" || m === "HEAD")) return handleArtifact(req, env, art[1]!);
@@ -90,6 +99,9 @@ export async function sweepAllApps(env: Env): Promise<Record<string, string>> {
     }
   };
   await Promise.all(Array.from({ length: Math.min(CRON_CONCURRENCY, ids.length) }, worker));
+  // 連絡の途絶えた Builder の指示を待ち行列に戻す（Builder が戻らなくても失敗として記録する）
+  const owners = await env.DB.prepare("SELECT DISTINCT owner_id FROM build_jobs WHERE status = 'claimed' AND lease_until < ?").bind(Date.now()).all<{ owner_id: string }>();
+  for (const o of owners.results) await reclaimExpired(env, o.owner_id).catch(() => undefined);
   const now = Date.now();
   await env.DB.batch([
     env.DB.prepare("DELETE FROM webhook_deliveries WHERE received_at < ?").bind(now - DELIVERY_RETENTION_MS),

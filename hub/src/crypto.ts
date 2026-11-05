@@ -82,3 +82,18 @@ export function randomCode(length = 10): string {
 export function normalizeCode(code: string): string {
   return code.replace(/[\s-]/g, "").toUpperCase();
 }
+
+/** ログなどに紛れた秘密情報を伏せる（Builder の末尾ログを保存する前に必ず通す） */
+const SECRET_PATTERNS: RegExp[] = [
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+  /\bgh[pousr]_[A-Za-z0-9]{20,}\b/g,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
+  /\bupb_[a-z]{1,2}_[A-Za-z0-9_-]{10,}/g,
+  /x-access-token:[^@\s]+/g,
+  /\b(Basic|Bearer)\s+[A-Za-z0-9+/=._-]{16,}/g,
+];
+export function redactSecrets(text: string): string {
+  let out = text;
+  for (const re of SECRET_PATTERNS) out = out.replace(re, "[伏せ字]");
+  return out;
+}
