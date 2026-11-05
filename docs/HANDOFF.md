@@ -1,107 +1,65 @@
 # 引き継ぎ
 
-## 終わったこと
+Upbeater は GitHub Actions の代替（`docs/DESIGN.md`）。開発順序は DESIGN.md の「開発の順序」に従う。
 
-`cd hub && npm test`（77 件）、`cd builder && npm test`（15 件）、`cd app && flutter test`（40 件）がすべて通る（型検査・`flutter analyze`・`wrangler deploy --dry-run`・Builder の組み立ても成功）。本番への公開はまだ行っていない。
+## 終わったこと：開発順序1「hub」
 
-### 開発順序1：hub の基盤（PR #1）
-
-Webhook の検証と重複除去、GitHub への照会による版の判定、アプリごとの直列化と連続更新の統合、コミット SHA ＋通番による版の管理、Ed25519 のマニフェスト署名（世代・失効・すり替えの拒否）、端末 API（登録・照合・報告）、Range 対応の成果物配信、Cron による巡回、GitHub 障害時の再試行。
-
-### 開発順序2：MCP と GitHub 操作
+`cd hub && npm test` で 50 件のテストがすべて通る（3 回繰り返して安定）。型検査と `wrangler deploy --dry-run` も成功。本番への公開は行っていない。
 
 | 項目 | 実装 |
 | --- | --- |
-| MCP サーバー | `src/mcp.ts`：`POST /mcp`（Streamable HTTP、JSON 応答、状態なし）。版の交渉、tools/list・tools/call、Origin の検査 |
-| OAuth 2.1 | `src/oauth.ts`：メタデータ、動的クライアント登録、PKCE（S256）、GitHub でのログイン → 同意の画面、コードの一回限りと再使用時の失効、リフレッシュトークンの回転 |
-| 同意の画面 | `src/pages.ts`：スマホ・タブレット・PC と暗い表示に対応 |
-| 道具 | `src/tools.ts`：list_apps・get_app・register_app・push_update・rollback・list_devices・create_registration_code・get_install_status・list_operations・create_branch・commit_files・open_pr・merge_pr・ship_change・get_request |
-| GitHub 操作 | `src/gitops.ts`：段階ごとに途中結果を保存し、失敗した段階から再開。依頼 ID で重複を検知。許可リスト、main への直接書き込みの禁止、main を取り込んでの再試行、衝突箇所・満たせない条件の返却 |
-| GitHub App | `src/github-app.ts`：JWT（RS256、PKCS#1 の鍵をそのまま使える）→ インストールトークン、失効時の取り直し |
-| 模擬 GitHub | `test/github-mock.js`：コミット・ツリー・PR・マージ・衝突・保護規則・App 認証・OAuth を再現 |
+| 土台 | `wrangler.jsonc`（D1・R2・Durable Object・毎分の Cron）、vitest（`@cloudflare/vitest-pool-workers`）、`migrations/0001_init.sql`（DESIGN.md「データ」の全テーブル＋補助のテーブル、全テーブルに owner_id） |
+| 合図 | `POST /webhook/github`（定数時間の署名検証・配信 ID での重複除去・push／pull_request／delete）、Cron の schedule（抜けた回は一度だけ補う）、手動実行の API |
+| 定義ファイル | `src/workflow/`：`.upbeater/*.yml` の取得・解析・検証。誤りはファイル名・行・列つき。on・jobs・needs・if・runs-on・env・secrets・steps（run・組み込み部品・distribute）・timeout・concurrency・matrix・artifacts・cache・rerun に対応。Workers に依存しない部品で、Actions の書き方（`strategy.matrix`・`timeout-minutes`・`schedule: - cron:`）も受け付ける |
+| 実行の管理 | needs の順に待ち行列へ、matrix の展開、concurrency の取り消しと直列化（リポジトリごとの Durable Object）、取り消し・失敗したジョブの再実行 |
+| Runner 用 API | 登録（一回限りのコード → トークン、ハッシュのみ保存）、ラベルに合うジョブの受け取り（二重に渡さない）、心拍、ログの逐次受信（通番で並べ直し・欠けた通番を返す）、手順の状態、終了の報告。ジョブトークンで古い実行の報告を拒否 |
+| 心拍・時間超過 | Cron で検知。心拍の途絶は再実行（`rerun: false` と上限 3 回を除く）、時間超過は打ち切って Runner に中断を指示 |
+| 秘密情報 | AES-GCM で暗号化して保存（鍵は Secret `SECRETS_KEY`）。指定された分だけ渡す。フォークからの PR には渡さない。ログ上で値と変形（base64・長い base64 の途中・URL 符号化・JSON・16 進）を伏せる。断片の境目で分かれた値も、つないだ時に伏せる |
+| 結果表示 | GitHub の Checks。待ち行列に積み、失敗しても実行は止めずに間隔を広げて再試行。最新の状態だけを送る。上限で諦めたら人の判断が要るものとして記録 |
+| GitHub | `src/github.ts`：差し替え可能なインターフェース（テストは `test/github-mock.js` の模擬 GitHub）。GitHub App の JWT → インストールトークン |
 
-### 受け入れ条件（RESILIENCE.md「GitHub 操作（MCP 経由）」）との対応
+### 受け入れ条件との対応
 
-| 局面 | テスト |
-| --- | --- |
-| 途中の段階で失敗 → 失敗した段階から再開 | `test/gitops.test.ts` |
-| マージ時の衝突（main を取り込んで再試行／解消できなければ PR を残し衝突箇所を返す） | `test/gitops.test.ts` |
-| ブランチ保護・必須の検査（満たせない条件を返す） | `test/gitops.test.ts` |
-| 同じ依頼の重複実行（既存の結果を返す） | `test/gitops.test.ts` |
-| GitHub App の権限失効の検知 | `test/gitops.test.ts`・`test/mcp.test.ts` |
-
-### 開発順序3：Builder
-
-| 項目 | 実装 |
-| --- | --- |
-| 待ち行列（Hub） | `migrations/0003_builder.sql`、`src/versions.ts`：版ができたら配布物ごとに指示を積み、古い版の指示は取り消す |
-| Builder API（Hub） | `src/routes/builder.ts`：受け取り（古い順・OS で絞る・二重に渡さない）、生存の連絡と中断の指示、成果物の提出（SHA-256 の照合）、失敗の報告、連絡の途絶えた指示の回収 |
-| 成果物の保存（Hub） | `src/artifact-store.ts`：受け取りながら SHA-256 を計算し、一致したものだけを ready にする。途中で切れた・不一致・取り消し済みは R2 から消す |
-| MCP の道具 | `create_builder`・`list_builders`・`list_builds`（失敗の段階・理由・末尾ログ）・`set_build_steps`、`register_app` に `install_steps` を追加 |
-| Builder 本体 | `builder/src/`：点検 → 取得 → コミットの照合 → ビルド → 成果物の確認 → 提出。作業場所は使い捨て、子プロセスはグループごと停止、秘密情報はログから伏せる |
-| 常駐 | `builder/launchd/`・`builder/install.sh`：launchd で常駐し、落ちたら起動し直す |
-
-### 受け入れ条件（RESILIENCE.md「ビルド（Builder）」）との対応
+**RESILIENCE-JOBS.md**
 
 | 局面 | テスト |
 | --- | --- |
-| Mac が停止・スリープ中（指示を残し、復帰時は最新版だけ） | `hub/test/builder-api.test.ts`・`builder/test/builder.test.ts` |
-| ビルド失敗（配信しない・現行版を維持・末尾ログを MCP から取得） | 同上 |
-| 途中で中断（作業場所を破棄し最初から。中途半端な成果物を上げない） | 同上 |
-| 複数アプリの同時更新（順番に処理・古い指示は統合） | 同上 |
-| ビルドに必要な道具の不足（開始前に点検し具体的に報告） | 同上 |
-| 署名の資格情報（保管の二重化・期限の予告） | 未対応（下の「残り」） |
+| Runner が停止中（待ち行列に保持、一定時間で通知） | `test/runner.test.ts` |
+| 実行中に Runner が落ちる（心拍の途絶 → 再実行、再実行しない指定） | `test/runner.test.ts` |
+| 時間超過（打ち切り・中断の指示） | `test/runner.test.ts` |
+| 新しい更新が来た（concurrency の取り消し・公開系の直列化） | `test/runs.test.ts` |
+| ログ送信の途切れ（再送・通番で並べ直し） | `test/logs-secrets.test.ts` |
+| 秘密情報の露出（変形も伏せる） | `test/logs-secrets.test.ts` |
+| 定義ファイルの誤り（行番号つき・GitHub にも失敗として表示） | `test/workflow.test.ts`・`test/runs.test.ts` |
+| GitHub への結果表示の失敗（再試行・実行は止めない） | `test/checks-cron.test.ts` |
+| フォークからの PR（秘密情報を渡さない） | `test/logs-secrets.test.ts` |
+| 無限の連鎖（自分のコミットを合図にしない） | `test/webhook.test.ts` |
+| 定期実行の取りこぼし（一度だけ補う） | `test/checks-cron.test.ts` |
+| Hub の停止中の Webhook（GitHub の再送・定期照合） | `test/webhook.test.ts`（受け付け失敗時は記録を消して再送に任せる）・`test/checks-cron.test.ts`（照合） |
+| 同じジョブの二重実行（ジョブトークンで排他） | `test/runner.test.ts` |
+| 作業場所の汚染 | Runner 側（開発順序2） |
 
-### 開発順序4：app（Android・macOS）
+**RESILIENCE.md（GitHub と Hub）**：重複・順序の入れ替わり（`webhook.test.ts`）、取りこぼし（`checks-cron.test.ts`）、強制プッシュ（`webhook.test.ts`）、連続した更新（concurrency：`runs.test.ts`）、GitHub の障害・回数制限（`checks-cron.test.ts`）、署名用の鍵の世代交代（`manifest.test.ts`）。
 
-| 項目 | 実装 |
-| --- | --- |
-| 署名の検証 | `app/lib/core/manifest.dart`：Hub の `acceptManifest` と同じ規則。Hub（TypeScript）が作った署名で照合を確かめた（`app/test/fixtures/manifests.json` は公開鍵と署名のみ） |
-| 取得 | `app/lib/core/downloader.dart`：Range・If-Range で続きから再開、SHA-256 とサイズの照合、不一致は破棄 |
-| 更新の手順 | `app/lib/core/updater.dart`：事前確認（許可・回線・空き容量・使用中）→ 取得 → 導入 → 起動の確認 → 報告。失敗・起動しない場合は前の版に戻す |
-| Android | `app/lib/platform/android.dart`・`MainActivity.kt`：PackageInstaller、パッケージ名・署名鍵・versionCode の事前照合、導入の許可の案内（一度だけ） |
-| macOS | `app/lib/platform/macos.dart`：展開 → バンドル ID の照合 → `/Applications` の差し替え → 隔離属性の解除 → 起動の確認、自己更新は別プロセス |
-| 画面 | 登録の画面・アプリの一覧（スマホ・タブレット・PC と暗い表示に対応。人の判断が要るものを先頭に並べる） |
-| Hub | `GET /v1/devices/apps`、マニフェストに導入の設定（`install`）を追加し署名に含めた |
+## 旧設計からの変更
 
-### 受け入れ条件（RESILIENCE.md）との対応
+- hub は「アプリ単位の配布」の旧設計から、Actions の代替の設計に作り直した。旧実装（MCP・OAuth・GitHub 操作・端末への配布の API）は git の履歴（コミット 44c1af8）に残っており、開発順序4（MCP と GitHub 操作）・6（端末への配布）で新しい表に合わせて移植する。マニフェスト署名（`src/manifest.ts`）と GitHub App 認証（`src/github-app.ts`）はそのまま残した
+- `builder/`（Node 製）は旧設計の Hub API 向けで、新しい Hub とは接続できない。開発順序2の Go 製 Runner に置き換えたら削除する
+- `app/` は開発順序6で新しい Hub に合わせる
 
-| 局面 | テスト |
-| --- | --- |
-| 通知が届かない（起動時・復帰時・定期の照合） | `app/lib/app_service.dart`（照合の契機）・`app/test/updater_test.dart` |
-| 端末が長期間オフライン（途中の版を飛ばす） | `app/test/updater_test.dart` |
-| ダウンロードの中断（続きから再開、検証を通ったものだけ） | `app/test/downloader_test.dart` |
-| 署名・SHA-256 の不一致（破棄して再取得、繰り返す場合はその版を止める） | `app/test/manifest_test.dart`・`downloader_test.dart`・`updater_test.dart` |
-| 古い版へのすり替え | `app/test/manifest_test.dart`・`updater_test.dart` |
-| 空き容量の不足・従量制通信 | `app/test/updater_test.dart` |
-| インストールの失敗（直前の版へ戻す、直近 2 つを保持） | `app/test/updater_test.dart`・`macos_installer_test.dart` |
-| 入れ替え後に起動しない | 同上 |
-| 対象アプリが使用中 | 同上 |
-| 利用者データ（同じ署名鍵・同じバンドル ID） | `macos_installer_test.dart`（バンドル ID）、Android は `MainActivity.kt` の署名鍵の照合 |
-| 権限の喪失（導入の許可の取り消し） | `app/test/updater_test.dart`（一度だけ案内して保留） |
-| Upbeater 自身の更新失敗 | macOS は別プロセスでの入れ替えと戻しを実装（実機での確認が必要） |
-| Hub 自体の障害 | `app/test/updater_test.dart` |
+## 残り（hub）
 
-## 残り
+- 管理 API は暫定（`ADMIN_TOKEN`）。開発順序4で MCP（OAuth）に置き換える
+- 成果物（artifacts）とキャッシュ（cache）の R2 への保存・取得の API（定義の解析と受け渡しは実装済み。Runner と合わせて開発順序2で）
+- `linux` のジョブをクラウド Runner へ回す仕組み（開発順序5）
+- 失敗の通知（いまは operations の `needs_human` に記録）
+- 本番公開（利用者の操作が要る）：GitHub App の作成、D1・R2 の作成、Secret の投入（LININGS. 経由）、`wrangler deploy`
 
-- **実機での組み立てと確認（利用者の端末が要る）**：この環境では Android SDK の配布元（dl.google.com）が通信方針で遮断され、Xcode も無いため、`flutter build apk`・`flutter build macos` と Kotlin のコンパイルを確かめられていない。Mac で `flutter build macos`、Android SDK のある環境で `flutter build apk` を実行して確かめる
-- 更新通知（FCM・APNs）：Firebase の設定ファイルと Apple の資格情報が要る。いまは起動時・復帰時・15 分ごとの照合で追いつく
-- Android のバックグラウンドでの定期照合（WorkManager）と、macOS のログイン時の起動
-- 低電力モードの考慮、署名期限の予告
-- 署名の資格情報（Android の署名鍵・Apple の証明書）の保管の二重化と期限の予告
-- 本番公開（利用者の操作が要る）：GitHub App の作成、D1・R2 の作成、Secret の投入（LININGS. 経由）、`wrangler deploy`、claude.ai へのコネクタ追加、Mac への Builder の導入
-- Hub と Builder・端末アプリを実際につないだ通し確認
-- 人の判断が要る失敗の利用者への通知、段階配信・一時停止・失敗の連鎖の停止（Hub 側）
+## 次にやること：開発順序2「runner」（Go、macOS・Linux）
 
-## 次にやること（開発順序5：app（Linux・iOS））
-
-1. Linux：AppImage の差し替えと `systemd --user` での再起動（`app/lib/platform/linux.dart`）
-2. iOS 第 1 段階：通知＋ワンタップ導入（`itms-services` の OTA 配布。Ad Hoc 署名と UDID 登録が必要。DESIGN.md の未決事項を先に決める）
-3. 上の「実機での組み立てと確認」を合わせて行う
-
-## 注意
-
-- `npm install` は `hub/.npmrc`・`builder/.npmrc` の `legacy-peer-deps=true` を前提にしている
-- `@cloudflare/vitest-pool-workers` は `@cloudflare/vitest-plugin` に改名された。後で移行を検討する
-- 暫定の管理 API `PUT /v1/admin/.../artifacts/:os` は、GitHub Releases を使うアプリ（`release`）の成果物の登録とテストのために残している
-- Flutter は 3.47.9（Dart 3.13）で確かめた
+1. `runner/`：単一の実行ファイル（Go）。`go test` で確かめる
+2. 登録（`POST /v1/runners/register`）→ トークンを権限 600 のファイルに保存
+3. 受け取り（`/claim`）→ 使い捨ての作業場所（Linux はコンテナ、macOS は一時ディレクトリ）→ `repo.auth_header` を git にだけ渡して取得 → 手順の実行（`run`・組み込み部品・`distribute`）
+4. 心拍（`heartbeat_interval_ms` ごと。`continue: false` なら子プロセスまで止める）、ログの逐次送信（通番つき。応答の `missing` を再送。送れない間は手元に保持）、手順の状態、終了の報告
+5. 秘密情報は環境変数で渡し、Runner でもログを伏せる（Hub と同じ変形を含む）
+6. 常駐（launchd・systemd）。RESILIENCE-JOBS.md の Runner 側の局面（作業場所の汚染・時間超過での子プロセスの終了・ログの保持と再送）を故障テストで確かめる

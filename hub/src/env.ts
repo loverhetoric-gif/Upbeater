@@ -1,80 +1,100 @@
 /** Worker に渡される束縛（バインディング）と設定 */
 export interface Env {
   DB: D1Database;
-  ARTIFACTS: R2Bucket;
-  APP_COORDINATOR: DurableObjectNamespace;
+  /** ログ・成果物・キャッシュ */
+  BLOBS: R2Bucket;
+  REPO_COORDINATOR: DurableObjectNamespace;
 
-  /** GitHub API への接続口。未設定なら通常の fetch を使う（テストでは模擬実装を束縛する） */
+  /** GitHub API への接続口。未設定なら通常の fetch（テストでは模擬実装を束縛する） */
   GITHUB_API?: Fetcher;
   GITHUB_API_BASE?: string;
+  GITHUB_WEB_BASE?: string;
+  GITHUB_APP_ID?: string;
+  /** Upbeater 自身（GitHub App）のログイン名。自分のコミットを合図にしないために使う */
+  UPBEATER_BOT_LOGIN?: string;
+  MANIFEST_REVOKED_GENERATIONS?: string;
 
   // Secret
   WEBHOOK_SECRET?: string;
-  MANIFEST_SIGNING_KEYS?: string;
-  DOWNLOAD_TOKEN_SECRET?: string;
+  /** 秘密情報を暗号化する鍵（32 バイトを base64） */
+  SECRETS_KEY?: string;
   ADMIN_TOKEN?: string;
-  GITHUB_TOKEN?: string;
   GITHUB_APP_PRIVATE_KEY?: string;
-  /** GitHub App のユーザー認証（MCP の OAuth で利用者を確かめる） */
-  GITHUB_APP_CLIENT_SECRET?: string;
-
-  // 設定値
-  GITHUB_APP_ID?: string;
-  GITHUB_APP_CLIENT_ID?: string;
-  /** GitHub の Web 側（OAuth の画面・トークン交換） */
-  GITHUB_WEB_BASE?: string;
-  /** MCP を使える GitHub アカウント（ログイン名または数値 ID、カンマ区切り）。空なら誰も使えない */
-  ALLOWED_GITHUB_USERS?: string;
-  /** マージ可否の再確認の間隔（ミリ秒） */
-  GITHUB_POLL_MS?: string;
-  MANIFEST_REVOKED_GENERATIONS?: string;
-  ARTIFACT_URL_TTL_SECONDS?: string;
+  GITHUB_TOKEN?: string;
+  MANIFEST_SIGNING_KEYS?: string;
 }
 
-export const SUPPORTED_OS = ["android", "ios", "macos", "linux"] as const;
-export type DeviceOs = (typeof SUPPORTED_OS)[number];
-export const APP_KINDS = ["direct", "build", "release"] as const;
-export type AppKind = (typeof APP_KINDS)[number];
-
-export interface AppRow {
+export interface RepoRow {
   id: string;
   owner_id: string;
+  full_name: string;
+  default_branch: string;
+  trigger_on_own_commits: number;
+  last_seen_sha: string | null;
+  last_reconciled_at: number | null;
+  next_run_number: number;
+  created_at: number;
+}
+
+export type JobStatus = "waiting" | "blocked" | "queued" | "claimed" | "succeeded" | "failed" | "cancelled" | "skipped";
+export const TERMINAL: readonly JobStatus[] = ["succeeded", "failed", "cancelled", "skipped"];
+
+export interface JobRow {
+  id: string;
+  owner_id: string;
+  run_id: string;
+  repo_id: string;
+  job_key: string;
   name: string;
-  repo_full_name: string;
-  branch: string;
-  kind: AppKind;
-  target_os: string;
-  install_steps: string;
-  last_seq: number;
-  current_sha: string | null;
-  pinned_seq: number | null;
-  last_checked_at: number | null;
+  matrix: string | null;
+  needs: string;
+  if_expr: string | null;
+  runs_on: string;
+  spec: string;
+  concurrency_group: string | null;
+  cancel_in_progress: number;
+  rerunnable: number;
+  status: JobStatus;
+  reason: string | null;
+  attempt: number;
+  runner_id: string | null;
+  job_token_hash: string | null;
+  cancel_requested: number;
+  claimed_at: number | null;
+  heartbeat_at: number | null;
+  finished_at: number | null;
+  waiting_notified: number;
   created_at: number;
   updated_at: number;
 }
 
-export interface ReleaseRow {
+export interface RunRow {
   id: string;
   owner_id: string;
-  app_id: string;
-  seq: number;
-  commit_sha: string;
-  os: string;
-  r2_key: string | null;
-  sha256: string | null;
-  size: number | null;
-  status: "pending" | "ready" | "failed" | "cancelled" | "halted";
+  repo_id: string;
+  number: number;
+  workflow_file: string;
+  workflow_name: string;
+  event: string;
+  ref: string | null;
+  branch: string | null;
+  sha: string;
+  actor: string | null;
+  is_fork: number;
+  status: "queued" | "running" | "completed";
+  conclusion: string | null;
+  problems: string | null;
+  inputs: string | null;
   created_at: number;
   updated_at: number;
 }
 
-export interface DeviceRow {
-  id: string;
-  owner_id: string;
-  name: string;
-  os: DeviceOs;
-  push_token: string | null;
-  token_hash: string;
-  created_at: number;
-  last_seen_at: number | null;
+/** ジョブの中身（jobs.spec） */
+export interface JobSpec {
+  steps: unknown[];
+  env: Record<string, string>;
+  secrets: string[];
+  timeout: number;
+  artifacts: { name: string; path: string }[];
+  cache?: { key: string; paths: string[] };
 }

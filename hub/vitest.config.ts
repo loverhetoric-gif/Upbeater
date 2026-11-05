@@ -27,7 +27,7 @@ export default defineConfig(async () => {
             TEST_MIGRATIONS: migrations,
             // 以下はテスト専用の使い捨ての値
             WEBHOOK_SECRET: "test-webhook-secret",
-            DOWNLOAD_TOKEN_SECRET: "test-download-secret",
+            SECRETS_KEY: Buffer.from(webcrypto.getRandomValues(new Uint8Array(32))).toString("base64"),
             ADMIN_TOKEN: "test-admin-token",
             GITHUB_API_BASE: "https://github-mock.test",
             MANIFEST_SIGNING_KEYS: JSON.stringify({ active: 2, keys: keys.slice(0, 2) }),
@@ -35,11 +35,7 @@ export default defineConfig(async () => {
             GITHUB_APP_ID: "12345",
             GITHUB_APP_PRIVATE_KEY: app.privateKey,
             TEST_APP_PUBLIC_JWK: JSON.stringify(app.publicKey),
-            GITHUB_APP_CLIENT_ID: "Iv1.test-client",
-            GITHUB_APP_CLIENT_SECRET: "test-github-client-secret",
             GITHUB_WEB_BASE: "https://github-mock.test",
-            ALLOWED_GITHUB_USERS: "allowed-user,424242",
-            GITHUB_POLL_MS: "5",
           },
           serviceBindings: { GITHUB_API: "github-mock" },
           workers: [
