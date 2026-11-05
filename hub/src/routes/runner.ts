@@ -8,6 +8,7 @@
  * - POST /v1/runners/jobs/:id/complete    終了の報告
  * ジョブごとの報告は、受け取った時に渡したジョブトークンが必要（再実行に移った古い実行の報告は受け付けない）。
  */
+import { settleReleases } from "../distribute";
 import { coordinatorCall } from "../coordinator";
 import { normalizeCode, randomToken, sha256Hex } from "../crypto";
 import type { Env, JobRow, JobSpec, RepoRow, RunRow } from "../env";
@@ -257,6 +258,7 @@ export async function handleComplete(req: Request, env: Env, id: string): Promis
       env.DB.prepare("UPDATE jobs SET status = ?, reason = ?, finished_at = ?, updated_at = ? WHERE id = ? AND status = 'claimed'").bind(status, reason ?? (job.cancel_requested ? "取り消しました" : null), now, now, id),
       operationStatement(env, { owner_id: job.owner_id, repo_id: job.repo_id, run_id: job.run_id, job_id: id, kind: "job", stage: "completed", status: status === "failed" ? "failed" : "ok", reason }, now),
     ]);
+    await settleReleases(env, id, status === "succeeded", now);
     await coordinatorCall(env, job.repo_id, "/advance", { job_id: id });
   }
   // 欠けているログの通番を返す（Runner は保持している分を再送する）

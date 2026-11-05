@@ -8,6 +8,7 @@ import { handleBlob } from "./routes/blobs";
 import { handleClaim, handleComplete, handleHeartbeat, handleLogs, handleRegisterRunner, handleStep } from "./routes/runner";
 import { handleSecretForm } from "./routes/secret-form";
 import { handleGitHubWebhook } from "./routes/webhook";
+import { handleDevices } from "./distribute";
 import { handleMcp } from "./mcp";
 import { authorizationServerMetadata, cors, handleAuthorize, handleConsent, handleGitHubCallback, handleRegisterClient, handleRevoke, handleToken, protectedResourceMetadata } from "./oauth";
 import { runCron } from "./scheduled";
@@ -44,6 +45,10 @@ async function route(req: Request, env: Env): Promise<Response> {
   const b = /^\/v1\/runners\/jobs\/([0-9a-f-]{36})\/(artifacts|cache)\/([^/]+)$/.exec(p);
   if (b) return handleBlob(req, env, b[1]!, b[2] as "artifacts" | "cache", b[3]!);
   if (p.startsWith("/v1/admin/")) return handleAdmin(req, env, p);
+  if (p.startsWith("/v1/devices/") || p.startsWith("/v1/artifacts/")) {
+    const r = await handleDevices(req, env, p, origin);
+    if (r) return r;
+  }
   const sf = /^\/secret-form\/([^/]+)$/.exec(p);
   if (sf) return handleSecretForm(req, env, sf[1]!);
   if (p === "/v1/keys" && m === "GET") {
