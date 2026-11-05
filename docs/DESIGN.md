@@ -130,7 +130,7 @@ Upbeater 自身の検査・公開も Upbeater で行い、Actions は使わな�
 - 作業場所：ジョブごとに `<状態>/work/<ジョブ>-<回>-<乱数>/{work,tmp,home}` を作り、終わったら消す。Linux の既定はコンテナ（docker・podman。作業場所を同じパスで入れ、利用者の uid で実行）、macOS の既定は専用の一時ディレクトリ。起動時に前の実行の残骸（作業場所・ラベル付きのコンテナ）を片付ける
 - 取得：`repo.auth_header` は git の子プロセスの環境変数（`GIT_CONFIG_*`）にだけ渡し、`.git/config` にも手順の環境にも残さない。手順に `checkout` が無ければ最初に取得する
 - 手順：`run` は `bash -eo pipefail`（無ければ `sh -e`）。`if` は Hub と同じ式（`runner/internal/expr`）。`${{ secrets.X }}`・`${{ env.X }}` は台本の中では環境変数の参照に置き換え、値をファイルに書かない。`continue-on-error`・手順の `timeout`・`working-directory` に対応
-- 組み込み部品：`checkout`・`setup-*`（道具が入っていて版が合うかを確かめる。道具は Runner の端末・コンテナのイメージに入れておく）・`cache`・`upload-artifact`・`download-artifact`。`distribute` はファイルを Hub に送る（署名・通知は開発順序6）
+- 組み込み部品：`checkout`・`setup-*`（道具が入っていて版が合うかを確かめる。道具は Runner の端末・コンテナのイメージに入れておく。普段使いと違う版が要る時は `~/.upbeater/tools/<名前>/` に置くと、`install.sh` がその bin を Runner の PATH の先頭に足す）・`cache`・`upload-artifact`・`download-artifact`。`distribute` はファイルを Hub に送る（署名・通知は開発順序6）
 - 子プロセス：手順ごとにプロセスグループを作り、ジョブの終わり・時間超過・中断でグループごと止める（TERM → 5 秒 → KILL）。setsid で抜けたものは環境変数の印（`UPBEATER_JOB_MARK`）で探して止める
 - ログ：Runner でも伏せてから（Hub と同じ変形。書き込みの境目で分かれた値も）通番つきの断片にし、ディスクに保持して送る。Hub が連続して受け取った通番までを消す。届かなかったログと終了の報告は次の起動で送る
 - 心拍：`heartbeat_interval_ms` ごと。`continue: false` なら止める。`stale_job` なら止めて報告しない。Runner の停止（SIGTERM）では報告せず、Hub が心拍の途絶として扱う（`rerun` の指定に従う）
