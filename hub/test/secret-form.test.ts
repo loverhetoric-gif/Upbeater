@@ -1,12 +1,12 @@
 import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { resolveSecrets } from "../src/secrets";
-import { FORM_TTL_MS, handleSecretForm } from "../src/routes/secret-form";
+import { handleSecretForm } from "../src/routes/secret-form";
 import { admin, OWNER, REPO, registerRepo } from "./helpers";
 
 async function issue(names: unknown, repo: string | null = REPO) {
   const r = await admin("POST", "/v1/admin/secret-forms", { owner_id: OWNER, names, ...(repo ? { repo } : {}) });
-  return { status: r.status, body: (await r.json()) as { url: string; expires_at: number; names: string[] } };
+  return { status: r.status, body: (await r.json()) as { url: string; names: string[] } };
 }
 const post = (url: string, fields: Record<string, string>) => SELF.fetch(url, { method: "POST", body: new URLSearchParams(fields) });
 
@@ -50,13 +50,15 @@ describe("秘密情報の入力ページ", () => {
     expect((await resolveSecrets(env, OWNER, repoId, ["CLOUDFLARE_API_TOKEN"])).CLOUDFLARE_API_TOKEN).toBe("cf-新しい値-abcdef");
   });
 
-  it("期限切れ・知らない鍵・形の違う鍵は使えない", async () => {
+  it("期限は無い。新しいページを出すと前のページは使えない。知らない鍵・形の違う鍵も使えない", async () => {
     await registerRepo();
     const { body } = await issue(["A_KEY"]);
     const token = body.url.split("/").pop()!;
-    const late = await handleSecretForm(new Request(body.url), env, token, body.expires_at + 1);
-    expect(late.status).toBe(410);
-    expect(Date.now() + FORM_TTL_MS - body.expires_at).toBeLessThan(5_000);
+    // 1 年後でも開ける
+    expect((await handleSecretForm(new Request(body.url), env, token, Date.now() + 365 * 24 * 60 * 60_000)).status).toBe(200);
+    const next = await issue(["A_KEY"]);
+    expect((await SELF.fetch(body.url)).status).toBe(410);
+    expect((await SELF.fetch(next.body.url)).status).toBe(200);
     expect((await SELF.fetch(`https://hub.test/secret-form/${"x".repeat(43)}`)).status).toBe(410);
     expect((await SELF.fetch("https://hub.test/secret-form/short")).status).toBe(410);
   });
