@@ -61,6 +61,18 @@ Runner のジョブごとの報告には、受け取った時の `job_token` を
 
 設定値（`wrangler.jsonc` の `vars`）：`GITHUB_API_BASE`・`GITHUB_WEB_BASE`・`GITHUB_APP_ID`・`UPBEATER_BOT_LOGIN`（自分のコミットを見分けるためのログイン名）・`MANIFEST_REVOKED_GENERATIONS`。
 
-## 公開（今回は行っていない）
+## 公開
+
+D1 は作成済み。R2 を Cloudflare の画面で有効にしてから、利用者の PC で次を実行する（何度実行してもよい）。
+
+```sh
+git clone https://github.com/loverhetoric-gif/Upbeater.git
+cd Upbeater/hub && npm install
+node scripts/deploy.mjs --pem <GitHub App の秘密鍵 .pem のパス>
+```
+
+Cloudflare へのログイン、R2 のバケットの作成、D1 のスキーマの適用、公開、Secret の投入（`WEBHOOK_SECRET`・`SECRETS_KEY`・`ADMIN_TOKEN` はその PC で生成。既にあるものは変えない）、GitHub App の Webhook の設定までを行う。生成した値は `~/.upbeater/hub-secrets.json`（権限 600）に保存し、画面には出さない。
+
+## 公開の前提
 
 GitHub App の作成（Webhook：push・pull_request・delete、権限：Checks 書き込み・Contents 読み取り・Metadata 読み取り）、D1・R2 の作成、`database_id` の置き換え、`wrangler d1 migrations apply`、Secret の投入、`wrangler deploy`。GitHub Actions も self-hosted runner も使わない。

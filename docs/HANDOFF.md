@@ -55,7 +55,9 @@ Upbeater は GitHub Actions の代替（`docs/DESIGN.md`）。開発順序は DE
 | 秘密鍵 | 発行済み（利用者の PC に .pem で保管）。Hub の公開時に LININGS. 経由で Secret `GITHUB_APP_PRIVATE_KEY` に入れる |
 | Webhook | 未設定（無効）。Hub の公開後に送り先 `https://<Hub>/webhook/github`、シークレット（`WEBHOOK_SECRET` と同じ値）、合図（push・pull_request・delete）を設定して有効にする |
 | App のインストール | 未（対象のリポジトリに入れる） |
-| Cloudflare（D1・R2 の作成、Secret の投入、`wrangler deploy`） | 未 |
+| D1 | 作成済み：`upbeater`（APAC、ID は `hub/wrangler.jsonc`）。スキーマは公開の手順で適用する |
+| R2 | 未：アカウントで R2 が有効になっていない。Cloudflare の画面で有効にする必要がある |
+| 公開・Secret の投入・Webhook の設定 | `hub/scripts/deploy.mjs` を利用者の PC で実行する（秘密情報はその PC で生成・投入し、チャットに出さない） |
 
 ## 残り（hub）
 
