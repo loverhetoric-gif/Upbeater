@@ -130,4 +130,4 @@ Hub（`src/cloud.ts`・テスト `test/cloud.test.ts`、計 103 件）、Runner�
 
 ### 残り
 
-- GCP 側の用意（課金が発生する）：`sh cloud-runner/deploy.sh <課金が有効なプロジェクト>` を実行し、出た値を `hub/wrangler.jsonc` に入れて公開する。それまでは Linux のジョブは Mac の Runner が受け取る
+- 課金が発生するため使わない（利用者の方針）。設定は空のままにし、Linux のジョブは Mac の Runner が受け取る。`cloud-runner/deploy.sh` は任意の追加として残すだけ

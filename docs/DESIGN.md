@@ -63,7 +63,8 @@ jobs:
 ## 実行環境（Runner）
 
 - **Upbeater Runner**：macOS・Linux に常駐する（launchd・systemd）。単一の実行ファイルで配布する（Go）。ラベル例：`macos`・`linux`
-- **クラウド Runner**：Mac が停止していても Linux のジョブを実行できるよう、Google Cloud Run Jobs 上で必要な時だけ起動する
+- **クラウド Runner**：Mac が停止していても Linux のジョブを実行できるよう、Google Cloud Run Jobs 上で必要な時だけ起動する仕組みを持つ。**課金が発生するため既定では使わない**（設定が空なら何もしない）。使わない間は、Linux のジョブも手元の常駐 Runner が受け取る
+- **費用の原則**：Upbeater は無料で動くこと。課金が発生する外部サービスに依存しない（任意の追加にとどめ、既定では無効）
 - クラウド Runner の実装（開発順序5）：Hub は毎分、待ち行列に 1 分以上残り、受け取れる常駐 Runner が動いていない `linux`（`CLOUD_RUNNER_LABELS`）のジョブごとに、Cloud Run Job を 1 回起動する。起動のたびに、そのジョブだけを受け取れる期限つき（時間の上限＋30 分）の使い捨て Runner を作り、トークンは実行の環境変数で渡す（Hub にはハッシュだけ）。起動に失敗したら次の分にもう一度、起動しても 15 分受け取られなければ起動し直す。コンテナ（`cloud-runner/Dockerfile`）は `upbeater-runner run` が環境変数から設定を作り、1 件実行して終わる（ジョブが来なければ 3 分で終わる）。用意は `cloud-runner/deploy.sh <GCP のプロジェクト>`
 - 各ジョブは使い捨ての作業場所で実行する（Linux はコンテナ、macOS は専用の一時ディレクトリ。Linux でコンテナの道具が無い時は一時ディレクトリで実行し、ログにその旨を書く）
 
