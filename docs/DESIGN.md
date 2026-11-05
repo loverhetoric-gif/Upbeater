@@ -93,9 +93,15 @@ Hub に MCP サーバー（`/mcp`）を持たせ、claude.ai のコネクタと�
 - 秘密情報：`list_secrets`（名前のみ）
 - GitHub 操作：`create_branch`・`commit_files`・`open_pr`・`merge_pr`
 
+### MCP の実装（開発順序4）
+
+- `/mcp`（Streamable HTTP・JSON 応答）。認証は OAuth 2.1（動的クライアント登録・PKCE（S256）・リフレッシュトークンの回転・コードの再使用でその認可を失効）。利用者の確認は GitHub App のユーザー認証（`GITHUB_APP_CLIENT_ID`・Secret `GITHUB_APP_CLIENT_SECRET`）で行い、`ALLOWED_GITHUB_USERS` のアカウントだけを通す。利用者は `gh:<GitHub のユーザー ID>`
+- 道具：`list_repos`・`register_repo`・`pause`（合図での実行を止める。手動実行は止めない。再開後は照合で最新に追いつく）・`run_workflow`・`list_runs`・`get_run`・`get_logs`・`rerun`・`cancel`・`list_runners`・`list_operations`・`migrate_workflows`（変換して PR。マージはしない）・`list_secrets`・`request_secrets`（入力ページの URL を発行。値はチャットに出さない）・`create_branch`・`commit_files`・`open_pr`・`merge_pr`・`ship_change`・`get_request`。配布の道具は開発順序6
+- 自分のコミット：MCP で依頼したコミット・PR は `requested_refs` に記録し、Upbeater 自身の書き込みでも合図にする（マージの push は、コミットに対応する PR でも確かめる）。それ以外の自分の push は合図にせず、既定ブランチなら処理済み（`last_seen_sha`）にして、定期照合が取りこぼしとして拾わないようにする
+
 ## GitHub 操作の内製化
 
-claude.ai の GitHub コネクタでは、PR 作成時の確認画面が読み込めず作業が止まる事象が起きた。Upbeater は自前の GitHub App で、ブランチ作成 → コミット → PR → マージを一続きで実行する。失敗しても止まらず、段階・理由・再試行の可否を返す。操作できるリポジトリは許可リストで限定し、main への直接書き込みは禁止する。
+claude.ai の GitHub コネクタでは、PR 作成時の確認画面が読み込めず作業が止まる事象が起きた。Upbeater は自前の GitHub App で、ブランチ作成 → コミット → PR → マージを一続きで実行する。失敗しても止まらず、段階・理由・再試行の可否を返す。操作できるリポジトリは Hub に登録したものに限定し、main への直接書き込みは禁止する。
 
 ## 構成
 

@@ -1,5 +1,6 @@
 /** POST /webhook/github：push・pull_request・delete を受ける */
 import { coordinatorCall, type EventOutcome } from "../coordinator";
+import { createGitHubClient, parseRepo, type GitHubClient } from "../github";
 import { verifyGitHubSignature } from "../crypto";
 import type { Env, RepoRow } from "../env";
 import { json } from "../http";
@@ -18,7 +19,7 @@ interface Payload {
   pusher?: { name?: string };
   repository?: { full_name?: string };
   commits?: { added?: string[]; modified?: string[]; removed?: string[] }[];
-  pull_request?: { head?: { sha?: string; ref?: string; repo?: { full_name?: string } | null }; base?: { ref?: string; repo?: { full_name?: string } } };
+  pull_request?: { number?: number; head?: { sha?: string; ref?: string; repo?: { full_name?: string } | null }; base?: { ref?: string; repo?: { full_name?: string } } };
 }
 
 /** Webhook の中身を合図にする。扱わないものは null */
@@ -54,6 +55,27 @@ export function toEvent(event: string, p: Payload): { info: Omit<EventInfo, "sha
 export function isOwnCommit(env: Env, p: Payload): boolean {
   const bot = (env.UPBEATER_BOT_LOGIN ?? "upbeater[bot]").toLowerCase();
   return (p.sender?.login ?? "").toLowerCase() === bot || (p.pusher?.name ?? "").toLowerCase() === bot;
+}
+
+/**
+ * Upbeater 自身の書き込みのうち、利用者が MCP で依頼したもの（コミット・PR）か。
+ * マージの push はマージの SHA の記録より先に届くことがあるため、コミットに対応する PR でも確かめる
+ */
+export async function isRequestedChange(env: Env, full: string, event: string, p: Payload, gh: GitHubClient = createGitHubClient(env)): Promise<boolean> {
+  const has = async (kind: "commit" | "pull", value: string) =>
+    !!(await env.DB.prepare("SELECT 1 FROM requested_refs WHERE repo_full_name = ? AND kind = ? AND value = ?").bind(full, kind, value).first());
+  if (event === "pull_request") {
+    const n = p.pull_request?.number;
+    return (typeof n === "number" && (await has("pull", String(n)))) || (!!p.pull_request?.head?.sha && (await has("commit", p.pull_request.head.sha)));
+  }
+  if (event !== "push" || !p.after) return false;
+  if (await has("commit", p.after)) return true;
+  try {
+    for (const n of await gh.listCommitPulls(parseRepo(full), p.after)) if (await has("pull", String(n))) return true;
+  } catch {
+    // GitHub に聞けない時は合図にしない（無限の連鎖を防ぐ側に倒す）
+  }
+  return false;
 }
 
 export async function handleGitHubWebhook(req: Request, env: Env): Promise<Response> {
@@ -92,8 +114,12 @@ export async function handleGitHubWebhook(req: Request, env: Env): Promise<Respo
   try {
     for (const repo of repos) {
       // 無限の連鎖を防ぐ：Upbeater 自身のコミットは、設定しない限り合図にしない
-      if (isOwnCommit(env, payload) && !repo.trigger_on_own_commits) {
+      if (isOwnCommit(env, payload) && !repo.trigger_on_own_commits && !(await isRequestedChange(env, full, event, payload))) {
         await recordOperation(env, { owner_id: repo.owner_id, repo_id: repo.id, kind: "event", stage: "own_commit", status: "ok", reason: "Upbeater 自身のコミットのため合図にしません" });
+        // 定期照合が「取りこぼし」として拾わないよう、処理済みにしておく
+        if (event === "push" && ev.info.branch === repo.default_branch && ev.info.sha) {
+          await env.DB.prepare("UPDATE repos SET last_seen_sha = ? WHERE id = ?").bind(ev.info.sha, repo.id).run();
+        }
         outcomes[repo.id] = "skipped";
         continue;
       }

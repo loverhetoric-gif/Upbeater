@@ -62,15 +62,102 @@ export interface CheckRunInput {
   };
 }
 
+export interface PullRequest {
+  number: number;
+  state: string;
+  merged: boolean;
+  mergeable: boolean | null;
+  mergeable_state: string;
+  head_ref: string;
+  head_sha: string;
+  base_ref: string;
+  html_url: string;
+  merge_commit_sha: string | null;
+}
+
+export interface CheckState {
+  name: string;
+  state: "success" | "pending" | "failure";
+}
+
+export interface TreeEntry {
+  path: string;
+  /** null は削除 */
+  sha: string | null;
+  mode?: string;
+}
+
+export type MergeResult = { merged: true; sha: string } | { merged: false; reason: "head_changed" | "not_mergeable"; message: string };
+
 /** GitHub 操作の抽象 */
 export interface GitHubClient {
   getBranchHead(repo: RepoRef, branch: string): Promise<string | null>;
   /** 指定のコミットの .upbeater/*.yml。フォルダが無ければ空 */
   listWorkflowFiles(repo: RepoRef, sha: string): Promise<WorkflowFile[]>;
+  /** 指定のコミット（またはブランチ）のフォルダ直下の YAML。フォルダが無ければ空 */
+  listYamlFiles(repo: RepoRef, ref: string, dir: string): Promise<WorkflowFile[]>;
   createCheckRun(repo: RepoRef, input: CheckRunInput): Promise<number>;
   updateCheckRun(repo: RepoRef, id: number, input: CheckRunInput): Promise<void>;
   /** コミットの状態（Checks の権限が無い時の代わり。Commit statuses の権限で書ける） */
   setCommitStatus(repo: RepoRef, sha: string, input: CommitStatusInput): Promise<void>;
+
+  // ── GitHub 操作（ブランチ → コミット → PR → マージ） ──
+  getDefaultBranch(repo: RepoRef): Promise<string>;
+  createBranch(repo: RepoRef, branch: string, sha: string): Promise<"created" | "exists">;
+  getCommitTree(repo: RepoRef, sha: string): Promise<string>;
+  createBlob(repo: RepoRef, base64: string): Promise<string>;
+  createTree(repo: RepoRef, baseTree: string, entries: TreeEntry[]): Promise<string>;
+  createCommit(repo: RepoRef, message: string, tree: string, parents: string[]): Promise<string>;
+  /** 早送りでのみ更新する。先に進んでいて早送りできなければ "not_fast_forward" */
+  updateBranch(repo: RepoRef, branch: string, sha: string): Promise<"updated" | "not_fast_forward">;
+  findOpenPull(repo: RepoRef, head: string, base: string): Promise<PullRequest | null>;
+  createPull(repo: RepoRef, p: { head: string; base: string; title: string; body: string }): Promise<PullRequest | "exists">;
+  getPull(repo: RepoRef, n: number): Promise<PullRequest>;
+  /** base を取り込む。衝突すれば "conflict" */
+  updatePullBranch(repo: RepoRef, n: number, expectedHeadSha: string): Promise<"updated" | "conflict">;
+  mergePull(repo: RepoRef, n: number, p: { sha: string; method: "merge" | "squash" | "rebase" }): Promise<MergeResult>;
+  listPullFiles(repo: RepoRef, n: number): Promise<string[]>;
+  compareFiles(repo: RepoRef, base: string, head: string): Promise<string[]>;
+  getChecks(repo: RepoRef, sha: string): Promise<CheckState[]>;
+  /** コミットを含む PR の番号 */
+  listCommitPulls(repo: RepoRef, sha: string): Promise<number[]>;
+}
+
+function toPull(v: unknown): PullRequest {
+  const p = v as {
+    number: number;
+    state: string;
+    merged?: boolean;
+    mergeable?: boolean | null;
+    mergeable_state?: string;
+    draft?: boolean;
+    head: { ref: string; sha: string };
+    base: { ref: string };
+    html_url: string;
+    merge_commit_sha?: string | null;
+  };
+  if (!p || typeof p.number !== "number" || !p.head || !p.base) throw new GitHubError("GitHub の応答の形式が想定外です", 200, true);
+  return {
+    number: p.number,
+    state: p.state,
+    merged: p.merged === true,
+    mergeable: p.mergeable ?? null,
+    mergeable_state: p.draft ? "draft" : (p.mergeable_state ?? "unknown"),
+    head_ref: p.head.ref,
+    head_sha: p.head.sha,
+    base_ref: p.base.ref,
+    html_url: p.html_url,
+    merge_commit_sha: p.merge_commit_sha ?? null,
+  };
+}
+
+function extractMessage(text: string): string {
+  try {
+    const j = JSON.parse(text) as { message?: string; errors?: { message?: string }[] };
+    return [j.message, ...(j.errors ?? []).map((e) => e.message)].filter(Boolean).join("：").slice(0, 300);
+  } catch {
+    return text.slice(0, 300);
+  }
 }
 
 export interface CommitStatusInput {
@@ -114,7 +201,11 @@ export class HttpGitHubClient implements GitHubClient {
   }
 
   async listWorkflowFiles(repo: RepoRef, sha: string): Promise<WorkflowFile[]> {
-    const res = await this.request(repo, `${this.base(repo)}/contents/.upbeater?ref=${enc(sha)}`, { pass: [404] });
+    return this.listYamlFiles(repo, sha, ".upbeater");
+  }
+
+  async listYamlFiles(repo: RepoRef, sha: string, dir: string): Promise<WorkflowFile[]> {
+    const res = await this.request(repo, `${this.base(repo)}/contents/${segs(dir)}?ref=${enc(sha)}`, { pass: [404] });
     if (res.status === 404) return [];
     const list = (await res.json()) as { type?: string; name?: string; path?: string }[];
     if (!Array.isArray(list)) return [];
@@ -141,6 +232,114 @@ export class HttpGitHubClient implements GitHubClient {
   async updateCheckRun(repo: RepoRef, id: number, input: CheckRunInput): Promise<void> {
     const { head_sha: _h, ...rest } = input;
     await this.request(repo, `${this.base(repo)}/check-runs/${id}`, { method: "PATCH", body: rest });
+  }
+
+  async getDefaultBranch(repo: RepoRef): Promise<string> {
+    const res = await this.request(repo, this.base(repo), { pass: [404] });
+    if (res.status === 404) throw new GitHubError("リポジトリが見つかりません（GitHub App が入っていない可能性）", 404, false, undefined, true);
+    const b = ((await res.json()) as { default_branch?: unknown }).default_branch;
+    if (typeof b !== "string") throw new GitHubError("GitHub の応答の形式が想定外です", 200, true);
+    return b;
+  }
+
+  async createBranch(repo: RepoRef, branch: string, sha: string): Promise<"created" | "exists"> {
+    const res = await this.request(repo, `${this.base(repo)}/git/refs`, { method: "POST", body: { ref: `refs/heads/${branch}`, sha }, pass: [422] });
+    return res.status === 422 ? "exists" : "created";
+  }
+
+  async getCommitTree(repo: RepoRef, sha: string): Promise<string> {
+    const res = await this.request(repo, `${this.base(repo)}/git/commits/${enc(sha)}`);
+    return this.sha(((await res.json()) as { tree?: { sha?: unknown } }).tree?.sha, res.status);
+  }
+
+  async createBlob(repo: RepoRef, base64: string): Promise<string> {
+    const res = await this.request(repo, `${this.base(repo)}/git/blobs`, { method: "POST", body: { content: base64, encoding: "base64" } });
+    return this.sha(((await res.json()) as { sha?: unknown }).sha, res.status);
+  }
+
+  async createTree(repo: RepoRef, baseTree: string, entries: TreeEntry[]): Promise<string> {
+    const tree = entries.map((e) => ({ path: e.path, mode: e.mode ?? "100644", type: "blob", sha: e.sha }));
+    const res = await this.request(repo, `${this.base(repo)}/git/trees`, { method: "POST", body: { base_tree: baseTree, tree } });
+    return this.sha(((await res.json()) as { sha?: unknown }).sha, res.status);
+  }
+
+  async createCommit(repo: RepoRef, message: string, tree: string, parents: string[]): Promise<string> {
+    const res = await this.request(repo, `${this.base(repo)}/git/commits`, { method: "POST", body: { message, tree, parents } });
+    return this.sha(((await res.json()) as { sha?: unknown }).sha, res.status);
+  }
+
+  async updateBranch(repo: RepoRef, branch: string, sha: string): Promise<"updated" | "not_fast_forward"> {
+    const res = await this.request(repo, `${this.base(repo)}/git/refs/heads/${segs(branch)}`, { method: "PATCH", body: { sha, force: false }, pass: [422] });
+    return res.status === 422 ? "not_fast_forward" : "updated";
+  }
+
+  async findOpenPull(repo: RepoRef, head: string, base: string): Promise<PullRequest | null> {
+    const res = await this.request(repo, `${this.base(repo)}/pulls?state=open&head=${enc(`${repo.owner}:${head}`)}&base=${enc(base)}`);
+    const list = (await res.json()) as unknown[];
+    return Array.isArray(list) && list[0] ? toPull(list[0]) : null;
+  }
+
+  async createPull(repo: RepoRef, p: { head: string; base: string; title: string; body: string }): Promise<PullRequest | "exists"> {
+    const res = await this.request(repo, `${this.base(repo)}/pulls`, { method: "POST", body: p, pass: [422] });
+    if (res.status === 422) {
+      const text = await res.text();
+      if (/already exists/i.test(text)) return "exists";
+      throw new GitHubError(`PR を作成できません：${extractMessage(text)}`, 422, false, undefined, true);
+    }
+    return toPull(await res.json());
+  }
+
+  async getPull(repo: RepoRef, n: number): Promise<PullRequest> {
+    const res = await this.request(repo, `${this.base(repo)}/pulls/${n}`, { pass: [404] });
+    if (res.status === 404) throw new GitHubError(`PR #${n} が見つかりません`, 404, false, undefined, true);
+    return toPull(await res.json());
+  }
+
+  async updatePullBranch(repo: RepoRef, n: number, expectedHeadSha: string): Promise<"updated" | "conflict"> {
+    const res = await this.request(repo, `${this.base(repo)}/pulls/${n}/update-branch`, { method: "PUT", body: { expected_head_sha: expectedHeadSha }, pass: [422] });
+    return res.status === 422 ? "conflict" : "updated";
+  }
+
+  async mergePull(repo: RepoRef, n: number, p: { sha: string; method: "merge" | "squash" | "rebase" }): Promise<MergeResult> {
+    const res = await this.request(repo, `${this.base(repo)}/pulls/${n}/merge`, { method: "PUT", body: { sha: p.sha, merge_method: p.method }, pass: [405, 409] });
+    if (res.status === 409) return { merged: false, reason: "head_changed", message: extractMessage(await res.text()) };
+    if (res.status === 405) return { merged: false, reason: "not_mergeable", message: extractMessage(await res.text()) };
+    return { merged: true, sha: this.sha(((await res.json()) as { sha?: unknown }).sha, res.status) };
+  }
+
+  async listPullFiles(repo: RepoRef, n: number): Promise<string[]> {
+    const res = await this.request(repo, `${this.base(repo)}/pulls/${n}/files?per_page=100`);
+    return ((await res.json()) as { filename?: string }[]).map((f) => f.filename ?? "").filter(Boolean);
+  }
+
+  async compareFiles(repo: RepoRef, base: string, head: string): Promise<string[]> {
+    const res = await this.request(repo, `${this.base(repo)}/compare/${enc(base)}...${enc(head)}`);
+    return (((await res.json()) as { files?: { filename?: string }[] }).files ?? []).map((f) => f.filename ?? "").filter(Boolean);
+  }
+
+  async getChecks(repo: RepoRef, sha: string): Promise<CheckState[]> {
+    const out: CheckState[] = [];
+    const runs = await this.request(repo, `${this.base(repo)}/commits/${enc(sha)}/check-runs?per_page=100`);
+    for (const r of ((await runs.json()) as { check_runs?: { name: string; status: string; conclusion: string | null }[] }).check_runs ?? []) {
+      out.push({ name: r.name, state: r.status !== "completed" ? "pending" : ["success", "neutral", "skipped"].includes(r.conclusion ?? "") ? "success" : "failure" });
+    }
+    const st = await this.request(repo, `${this.base(repo)}/commits/${enc(sha)}/status`);
+    for (const s of ((await st.json()) as { statuses?: { context: string; state: string }[] }).statuses ?? []) {
+      out.push({ name: s.context, state: s.state === "success" ? "success" : s.state === "pending" ? "pending" : "failure" });
+    }
+    return out;
+  }
+
+  async listCommitPulls(repo: RepoRef, sha: string): Promise<number[]> {
+    const res = await this.request(repo, `${this.base(repo)}/commits/${enc(sha)}/pulls?per_page=20`, { pass: [404, 422] });
+    if (!res.ok) return [];
+    const list = (await res.json()) as { number?: unknown }[];
+    return Array.isArray(list) ? list.map((x) => x.number).filter((n): n is number => typeof n === "number") : [];
+  }
+
+  private sha(v: unknown, status: number): string {
+    if (typeof v !== "string" || !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(v)) throw new GitHubError("GitHub の応答の形式が想定外です", status, true);
+    return v;
   }
 
   private async request(

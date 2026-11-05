@@ -126,7 +126,7 @@ export async function noticeWaitingJobs(env: Env, now = Date.now()): Promise<num
 export async function reconcile(env: Env, opts: { gh?: GitHubClient; now?: number } = {}): Promise<number> {
   const now = opts.now ?? Date.now();
   const gh = opts.gh ?? createGitHubClient(env);
-  const repos = await env.DB.prepare("SELECT * FROM repos WHERE last_reconciled_at IS NULL OR last_reconciled_at < ? LIMIT 50").bind(now - RECONCILE_INTERVAL_MS).all<RepoRow>();
+  const repos = await env.DB.prepare("SELECT * FROM repos WHERE paused = 0 AND (last_reconciled_at IS NULL OR last_reconciled_at < ?) LIMIT 50").bind(now - RECONCILE_INTERVAL_MS).all<RepoRow>();
   let recovered = 0;
   for (const repo of repos.results) {
     await env.DB.prepare("UPDATE repos SET last_reconciled_at = ? WHERE id = ?").bind(now, repo.id).run();
@@ -160,7 +160,17 @@ export async function runCron(env: Env, now = Date.now()): Promise<void> {
     ["notice", () => noticeWaitingJobs(env, now)],
     ["reconcile", () => reconcile(env, { now })],
     ["checks", () => flushChecks(env, { now })],
-    ["cleanup", () => env.DB.prepare("DELETE FROM webhook_deliveries WHERE received_at < ?").bind(now - 7 * 86_400_000).run()],
+    [
+      "cleanup",
+      () =>
+        env.DB.batch([
+          env.DB.prepare("DELETE FROM webhook_deliveries WHERE received_at < ?").bind(now - 7 * 86_400_000),
+          env.DB.prepare("DELETE FROM requested_refs WHERE created_at < ?").bind(now - 30 * 86_400_000),
+          env.DB.prepare("DELETE FROM oauth_requests WHERE expires_at < ?").bind(now),
+          env.DB.prepare("DELETE FROM oauth_codes WHERE expires_at < ?").bind(now - 86_400_000),
+          env.DB.prepare("DELETE FROM oauth_tokens WHERE expires_at < ?").bind(now - 86_400_000),
+        ]),
+    ],
   ];
   for (const [name, t] of tasks) {
     try {

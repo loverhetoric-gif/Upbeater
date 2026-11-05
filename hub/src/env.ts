@@ -13,6 +13,12 @@ export interface Env {
   /** Upbeater 自身（GitHub App）のログイン名。自分のコミットを合図にしないために使う */
   UPBEATER_BOT_LOGIN?: string;
   MANIFEST_REVOKED_GENERATIONS?: string;
+  /** GitHub App の Client ID（MCP の OAuth で GitHub にログインしてもらう。秘密情報ではない） */
+  GITHUB_APP_CLIENT_ID?: string;
+  /** MCP に接続できる GitHub のアカウント（ログイン名か数値 ID をカンマ区切り） */
+  ALLOWED_GITHUB_USERS?: string;
+  /** マージの可否の判定を待つ間隔（ミリ秒。テストで短くする） */
+  GITHUB_POLL_MS?: string;
 
   // Secret
   WEBHOOK_SECRET?: string;
@@ -20,6 +26,8 @@ export interface Env {
   SECRETS_KEY?: string;
   ADMIN_TOKEN?: string;
   GITHUB_APP_PRIVATE_KEY?: string;
+  /** GitHub App の Client secret（MCP の OAuth） */
+  GITHUB_APP_CLIENT_SECRET?: string;
   GITHUB_TOKEN?: string;
   MANIFEST_SIGNING_KEYS?: string;
 }
@@ -33,6 +41,7 @@ export interface RepoRow {
   last_seen_sha: string | null;
   last_reconciled_at: number | null;
   next_run_number: number;
+  paused: number;
   created_at: number;
 }
 
