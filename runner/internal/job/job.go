@@ -320,6 +320,7 @@ func (r *runner) execute(ctx context.Context) (string, string) {
 			continue
 		}
 		if !ok {
+			r.setOutcome(st.ID, "skipped", false)
 			r.step(ctx, i, name, "skipped", nil)
 			continue
 		}
@@ -327,8 +328,19 @@ func (r *runner) execute(ctx context.Context) (string, string) {
 		r.line(fmt.Sprintf("▶ 手順 %d：%s", i+1, name))
 		r.step(ctx, i, name, "running", nil)
 		start := time.Now()
+		files, ferr := r.newStepFiles(i)
+		if ferr != nil {
+			return "failure", "作業場所に書けません：" + ferr.Error()
+		}
+		files.apply(r.env)
 		code, err := r.runStep(ctx, i, st)
 		r.out.Flush()
+		if ctx.Err() == nil && err == nil {
+			if cerr := r.collect(st.ID, files); cerr != nil {
+				err = cerr
+			}
+			r.out.Flush()
+		}
 		if ctx.Err() != nil {
 			r.step(context.Background(), i, name, "cancelled", nil)
 			break
@@ -345,6 +357,7 @@ func (r *runner) execute(ctx context.Context) (string, string) {
 				ec = &code
 			}
 			r.step(ctx, i, name, "failure", ec)
+			r.setOutcome(st.ID, "failure", st.ContinueOnError)
 			if st.ContinueOnError {
 				r.line(fmt.Sprintf("✖ 失敗（%s）— continue-on-error のため続けます", msg))
 				continue
@@ -357,6 +370,7 @@ func (r *runner) execute(ctx context.Context) (string, string) {
 			continue
 		}
 		zero := 0
+		r.setOutcome(st.ID, "success", false)
 		r.step(ctx, i, name, "success", &zero)
 		r.line(fmt.Sprintf("✔ 成功（%s）", time.Since(start).Round(100*time.Millisecond)))
 	}
@@ -475,12 +489,24 @@ func normalize(x any) expr.Value {
 // baseEnv はすべての手順に渡す環境変数（ジョブの env・秘密情報・Upbeater の値）。
 func (r *runner) baseEnv() map[string]string {
 	env := map[string]string{}
-	for k, v := range r.j.Env {
+	// ジョブの env の ${{ secrets.X }}・${{ env.X }} などは、ここで値にする（書いた順に依らないよう名前の順）
+	keys := make([]string, 0, len(r.j.Env))
+	for k := range r.j.Env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v, err := r.subst(r.j.Env[k], false, env)
+		if err != nil {
+			r.line(fmt.Sprintf("注意：env.%s の式を読めません（空にしました）：%v", k, err))
+			v = ""
+		}
 		env[k] = v
 	}
 	for k, v := range r.j.Secrets {
 		env[k] = v
 	}
+	r.compatEnv(env)
 	env["UPBEATER_WORKSPACE"] = r.ws.Work
 	env["UPBEATER_JOB_ID"] = r.j.Job.ID
 	env["UPBEATER_REPOSITORY"] = r.j.Repo.FullName

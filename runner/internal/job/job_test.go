@@ -282,7 +282,7 @@ func TestArtifactsAndCache(t *testing.T) {
 	j2 := e.job("job-down",
 		hub.Step{Kind: "uses", Uses: "actions/cache@v4", With: map[string]string{"key": "deps-v1", "path": "deps\n~/.toolcache"}},
 		hub.Step{Kind: "uses", Uses: "download-artifact", With: map[string]string{"name": "app", "path": "got"}},
-		sh("cat got/dist/app.txt deps/d.txt ~/.toolcache/t"),
+		sh("cat got/app.txt deps/d.txt ~/.toolcache/t"),
 	)
 	if r := e.exec(j2); r.Conclusion != "success" {
 		t.Fatalf("取り出しのジョブが失敗：%+v\n%s", r, e.hub.Log("job-down"))

@@ -43,6 +43,17 @@ export interface CreatedRun {
   conclusion?: string;
 }
 
+/** concurrency の group の ${{ matrix.x }}・${{ ref }}・${{ branch }}・${{ event }} を、この実行の値に置き換える */
+export function concurrencyGroup(group: string, e: Pick<EventInfo, "kind" | "ref" | "branch">, combo?: Record<string, unknown> | null): string {
+  return group.replace(/\$\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}/g, (m, name: string) => {
+    if (name.startsWith("matrix.")) return String(combo?.[name.slice(7)] ?? "");
+    if (name === "ref") return e.ref ?? "";
+    if (name === "branch") return e.branch ?? "";
+    if (name === "event") return e.kind;
+    return m;
+  });
+}
+
 async function nextNumber(env: Env, repo: RepoRow): Promise<number> {
   const r = await env.DB.prepare("UPDATE repos SET next_run_number = next_run_number + 1 WHERE id = ? RETURNING next_run_number - 1 AS n")
     .bind(repo.id)
@@ -108,8 +119,7 @@ async function createRun(env: Env, repo: RepoRow, w: Workflow, e: EventInfo, now
     const combos = j.matrix ? expandMatrix(j.matrix) : [null];
     for (const combo of combos) {
       const spec: JobSpec = { steps: j.steps, env: { ...w.env, ...j.env }, secrets: j.secrets, timeout: j.timeout, artifacts: j.artifacts, ...(j.cache ? { cache: j.cache } : {}) };
-      // concurrency の group に matrix の値を使えるように置き換える（${{ matrix.x }}）
-      const group = j.concurrency ? j.concurrency.group.replace(/\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}/g, (_, k: string) => String(combo?.[k] ?? "")) : null;
+      const group = j.concurrency ? concurrencyGroup(j.concurrency.group, e, combo) : null;
       stmts.push(
         env.DB.prepare(
           `INSERT INTO jobs (id, owner_id, run_id, repo_id, job_key, name, matrix, needs, if_expr, runs_on, spec, concurrency_group, cancel_in_progress, rerunnable, status, created_at, updated_at)

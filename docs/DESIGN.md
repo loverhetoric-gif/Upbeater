@@ -136,6 +136,15 @@ Upbeater 自身の検査・公開も Upbeater で行い、Actions は使わな�
 - 心拍：`heartbeat_interval_ms` ごと。`continue: false` なら止める。`stale_job` なら止めて報告しない。Runner の停止（SIGTERM）では報告せず、Hub が心拍の途絶として扱う（`rerun` の指定に従う）
 - 成果物・キャッシュの Hub API：`PUT/GET /v1/runners/jobs/:id/artifacts/:name`（同じ実行の中）・`/cache/:key`（同じリポジトリの中、一度保存したら変えない、フォークからは保存できない）。送る時は SHA-256 を付け、R2 が照合してから保存する。取り出した Runner も照合してから展開する。展開では置き場所の外へ書くもの（`..`・絶対パス・外を指すリンク）を拒否する
 
+## 移行ツール（開発順序3で実装）
+
+- 変換の部品は `hub/src/workflow/convert.ts`（Workers に依存しない。開発順序4の MCP `migrate_workflows` でも使う）。利用者の PC では `node hub/scripts/migrate.mjs <リポジトリのフォルダ>` で `.github/workflows/*.yml` を読み、`.upbeater/*.yml` を書き、報告を出す。`--check` は書かずに報告だけ。`--label 元=先` は runs-on のラベルを置き換える（例：Linux の Runner がまだ無い時に `linux=macos`）
+- 報告は「変換できません」（そのままでは同じ動きにならない。定義では、その手順を失敗させる `run` に置き換えて、黙って抜け落ちないようにする）と「注意」（動きは変わらないか、差が小さい）の 2 段階。どちらも元のファイルの行番号つき。書いた定義は `parseWorkflow` で検証する
+- 対応：`on`（`workflow_dispatch` → `manual`。`branches-ignore`・`paths-ignore` は `!` の型に直す）、ワークフロー全体の `concurrency`・`defaults.run.working-directory` は各ジョブへ移す（concurrency の group はジョブ名を足し、同じ実行のジョブ同士で取り消し合わないようにする）、`runs-on`（`ubuntu-*` → `linux`、`macos-*` → `macos`）、`timeout-minutes`、`strategy.matrix`、`secrets.X` の参照からジョブの `secrets` を集める、式の `github.*`（`event_name` → `event`、`ref`・`sha`・`repository` → `repo`・`actor`・`event.inputs.x` → `inputs.x`）、`github.token` → `secrets.GITHUB_TOKEN`（Upbeater は GitHub のトークンを自動で発行しないため、利用者が同じ名前で登録する）
+- 部品：`actions/checkout`・`setup-node`・`setup-java`・`setup-go`・`setup-python`・`subosito/flutter-action`（→ `setup-flutter`）・`cache`・`upload-artifact`・`download-artifact`（name を省いたものは、依存先が保存した成果物ごとに分けて取り出す）。そのほかの部品は「変換できません」
+- Actions の台本との互換（Runner）：環境変数 `CI`・`GITHUB_SHA`・`GITHUB_REF`・`GITHUB_REF_NAME`・`GITHUB_EVENT_NAME`（Actions の名前。manual は `workflow_dispatch`）・`GITHUB_REPOSITORY`・`GITHUB_ACTOR`・`GITHUB_RUN_NUMBER`、手順ごとのファイル `GITHUB_OUTPUT`（→ 後の手順の式で `steps.<id>.outputs.<名前>`）・`GITHUB_ENV`（後の手順の環境変数）・`GITHUB_PATH`・`GITHUB_STEP_SUMMARY`（ログに写す）。手順の `id` と `steps.<id>.outcome` を使える。ジョブの env の `${{ secrets.X }}` などは Runner が値にする。成果物は Actions と同じく、指定したものに共通する一番近いフォルダを起点にまとめる（`path: app/build/x.apk` なら、取り出すと `<取り出し先>/x.apk`）
+- concurrency の group には `${{ matrix.x }}` のほか、`${{ ref }}`・`${{ branch }}`・`${{ event }}` を書ける（Hub が実行の値に置き換える）
+
 ## 移行計画
 
 1. 最大の消費源である LIFElive の `build.yml`・`deploy.yml` を最初に置き換え、実地で検証する

@@ -37,8 +37,8 @@ export interface Concurrency {
 }
 
 export type Step =
-  | { kind: "run"; name?: string; run: string; env?: Record<string, string>; if?: string; workingDirectory?: string; timeout?: number; continueOnError?: boolean }
-  | { kind: "uses"; name?: string; uses: string; with?: Record<string, string>; env?: Record<string, string>; if?: string; timeout?: number; continueOnError?: boolean }
+  | { kind: "run"; id?: string; name?: string; run: string; env?: Record<string, string>; if?: string; workingDirectory?: string; timeout?: number; continueOnError?: boolean }
+  | { kind: "uses"; id?: string; name?: string; uses: string; with?: Record<string, string>; env?: Record<string, string>; if?: string; timeout?: number; continueOnError?: boolean }
   | { kind: "distribute"; name?: string; platform: string; file: string; if?: string };
 
 export interface Matrix {

@@ -261,10 +261,11 @@ function steps(c: Ctx, n: Node | undefined, jobId: string): Step[] {
     return [];
   }
   const out: Step[] = [];
+  const ids = new Set<string>();
   (n.items as Node[]).forEach((it, i) => {
     const where = `jobs.${jobId}.steps[${i + 1}]`;
     if (!isMap(it)) return c.err(it, `${where} は設定の並びで書いてください`);
-    checkKeys(c, it, ["name", "run", "uses", "with", "distribute", "env", "if", "working-directory", "timeout", "continue-on-error"], where);
+    checkKeys(c, it, ["id", "name", "run", "uses", "with", "distribute", "env", "if", "working-directory", "timeout", "continue-on-error"], where);
     const kinds = ["run", "uses", "distribute"].filter((k) => get(it, k) !== undefined);
     if (kinds.length !== 1) return c.err(it, `${where} には run・uses・distribute のどれか一つを書いてください`);
     const name = get(it, "name") ? str(c, get(it, "name"), "name") : undefined;
@@ -274,12 +275,26 @@ function steps(c: Ctx, n: Node | undefined, jobId: string): Step[] {
     const timeout = timeoutNode ? minutes(c, timeoutNode, `${where}.timeout`) : undefined;
     const coe = get(it, "continue-on-error");
     const continueOnError = isScalar(coe) && coe.value === true;
+    // id は後の手順の式で steps.<id>.outputs.<名前> として使う
+    const idNode = get(it, "id");
+    let id: string | undefined;
+    if (idNode !== undefined) {
+      id = str(c, idNode, `${where}.id`);
+      if (id !== undefined && !ID.test(id)) {
+        c.err(idNode, `${where}.id「${id}」は使えません（英字で始まる英数字・_・-）`);
+        id = undefined;
+      } else if (id !== undefined && ids.has(id)) {
+        c.err(idNode, `${where}.id「${id}」は同じジョブの中で重なっています`);
+        id = undefined;
+      }
+      if (id !== undefined) ids.add(id);
+    }
     const common = { ...(name ? { name } : {}), ...(ifs ? { if: ifs } : {}) };
     if (kinds[0] === "run") {
       const run = str(c, get(it, "run"), `${where}.run`);
       if (run === undefined || !run.trim()) return c.err(get(it, "run"), `${where}.run が空です`);
       const wd = get(it, "working-directory") ? str(c, get(it, "working-directory"), "working-directory") : undefined;
-      out.push({ kind: "run", run, ...common, ...(Object.keys(env).length ? { env } : {}), ...(wd ? { workingDirectory: wd } : {}), ...(timeout ? { timeout } : {}), ...(continueOnError ? { continueOnError } : {}) });
+      out.push({ kind: "run", run, ...(id ? { id } : {}), ...common, ...(Object.keys(env).length ? { env } : {}), ...(wd ? { workingDirectory: wd } : {}), ...(timeout ? { timeout } : {}), ...(continueOnError ? { continueOnError } : {}) });
     } else if (kinds[0] === "uses") {
       const uses = str(c, get(it, "uses"), `${where}.uses`);
       if (!uses) return;
@@ -288,7 +303,7 @@ function steps(c: Ctx, n: Node | undefined, jobId: string): Step[] {
         return c.err(get(it, "uses"), `組み込み部品「${uses}」はありません（使えるもの：${BUILTIN_COMPONENTS.join("・")}）`);
       }
       const w = strMap(c, get(it, "with"), `${where}.with`);
-      out.push({ kind: "uses", uses, ...common, ...(Object.keys(w).length ? { with: w } : {}), ...(Object.keys(env).length ? { env } : {}), ...(timeout ? { timeout } : {}), ...(continueOnError ? { continueOnError } : {}) });
+      out.push({ kind: "uses", uses, ...(id ? { id } : {}), ...common, ...(Object.keys(w).length ? { with: w } : {}), ...(Object.keys(env).length ? { env } : {}), ...(timeout ? { timeout } : {}), ...(continueOnError ? { continueOnError } : {}) });
     } else {
       const d = get(it, "distribute");
       if (!isMap(d)) return c.err(d, `${where}.distribute は {platform, file} で書いてください`);
@@ -297,6 +312,7 @@ function steps(c: Ctx, n: Node | undefined, jobId: string): Step[] {
       const file = get(d, "file") ? str(c, get(d, "file"), "file") : undefined;
       if (!platform || !["android", "ios", "macos", "linux"].includes(platform)) return c.err(get(d, "platform") ?? d, "distribute.platform は android・ios・macos・linux のどれかです");
       if (!file) return c.err(d, "distribute.file がありません");
+      if (idNode !== undefined) c.err(idNode, `${where}.id は distribute には書けません`);
       out.push({ kind: "distribute", platform, file, ...common });
     }
   });
