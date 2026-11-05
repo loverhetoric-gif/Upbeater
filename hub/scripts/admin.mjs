@@ -8,7 +8,9 @@
  *   node scripts/admin.mjs secret <名前> [--repo owner/name]    秘密情報を登録する（値は伏せて入力）
  *   node scripts/admin.mjs secret-form [--repo owner/name] <名前>…   秘密情報の入力ページ（スマホで開ける・一回限り・期限なし。同じリポジトリの前のページは使えなくなる）を発行する
  *   node scripts/admin.mjs run <owner/name> <定義ファイル>       手動実行（例 .upbeater/ci.yml）
+ *   node scripts/admin.mjs mcp-connect [--owner ログイン名]     Upbeater の MCP をこの PC の Claude Code に登録する（トークンは画面に出さない）
  */
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -113,6 +115,21 @@ switch (cmd) {
     if (!rest[1]) fail("定義ファイルを指定してください（例 .upbeater/ci.yml）");
     const r = await call("POST", "/v1/admin/runs", { owner_id: await ownerId(repo.split("/")[0]), repo, workflow: rest[1] });
     console.log(`手動実行：${r.status}${r.runs ? `（実行 #${r.runs.map((x) => x.number).join("・#")}）` : ""}`);
+    break;
+  }
+  case "mcp-connect": {
+    const login = opt("owner") ?? "loverhetoric-gif";
+    const r = await call("POST", "/v1/admin/mcp-tokens", { owner_id: await ownerId(login), name: "claude-code" });
+    const url = `${store.hub_url}/mcp`;
+    // 前の登録を消してから入れ直す（トークンは引数で渡し、画面には出さない）
+    spawnSync("claude", ["mcp", "remove", "--scope", "user", "upbeater"], { stdio: "ignore" });
+    const add = spawnSync("claude", ["mcp", "add", "--scope", "user", "--transport", "http", "upbeater", url, "--header", `Authorization: Bearer ${r.token}`], { stdio: ["ignore", "ignore", "pipe"], encoding: "utf8" });
+    if (add.status !== 0) fail(`Claude Code に登録できません：${(add.stderr ?? "").replace(r.token, "***").slice(0, 300)}`);
+    // つながるかを確かめる
+    const res = await fetch(url, { method: "POST", headers: { authorization: `Bearer ${r.token}`, "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) });
+    const tools = res.ok ? ((await res.json()).result?.tools ?? []).length : 0;
+    if (!tools) fail(`登録しましたが、Hub の MCP に接続できません（${res.status}）`);
+    console.log(`Claude Code に Upbeater の MCP を登録しました（道具 ${tools} 個）。新しい会話から使えます`);
     break;
   }
   default:
