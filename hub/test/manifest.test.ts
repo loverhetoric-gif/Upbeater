@@ -1,6 +1,9 @@
 import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { b64url, fromB64url } from "../src/crypto";
+
+const ORIGIN = "https://hub.test";
+const sha = (n: number) => String(n).padStart(40, "0");
 import {
   acceptManifest,
   evaluateManifest,
@@ -12,7 +15,6 @@ import {
   type SignedManifest,
   type SigningKeySet,
 } from "../src/manifest";
-import { createApp, deviceCall, ORIGIN, pushAndSync, registerDevice, sha, upload } from "./helpers";
 
 const ALL = JSON.parse(env.TEST_ALL_SIGNING_KEYS) as SigningKeySet["keys"];
 const NOW = Date.now();
@@ -130,24 +132,5 @@ describe("古い版へのすり替えの拒否", () => {
     expect(evaluateManifest({ ...b, expires_at: NOW - 1 }, ctx(1))).toEqual({ ok: false, reason: "expired" });
     expect(evaluateManifest({ ...b, app_id: "x" }, ctx(1))).toEqual({ ok: false, reason: "wrong_app" });
     expect(evaluateManifest({ ...b, os: "ios" }, ctx(1))).toEqual({ ok: false, reason: "wrong_os" });
-  });
-
-  it("Hub は巻き戻し先に固定されたアプリについて、署名付きの巻き戻し指示を出す", async () => {
-    await createApp({ os: ["android"] });
-    const dev = await registerDevice();
-    await pushAndSync("app1", "Example/Repo", "main", sha("A"));
-    await upload("app1", 1, "android", new Uint8Array([1]));
-    await pushAndSync("app1", "Example/Repo", "main", sha("B"));
-    await upload("app1", 2, "android", new Uint8Array([2]));
-    await env.DB.prepare("UPDATE apps SET pinned_seq = 1 WHERE id = 'app1'").run();
-
-    const res = await deviceCall(dev.token, "/v1/devices/check", { app_id: "app1", current_seq: 2 });
-    const { manifest, public_keys } = (await res.json()) as {
-      manifest: SignedManifest;
-      public_keys: { gen: number; status: string; jwk: JsonWebKey }[];
-    };
-    const keys = new Map(public_keys.map((k) => [k.gen, k.jwk]));
-    const r = await acceptManifest(manifest, keys, new Set(), { app_id: "app1", os: "android", current_seq: 2, now: Date.now() });
-    expect(r).toMatchObject({ ok: true, action: "rollback", body: { seq: 1, rollback: { to_seq: 1 } } });
   });
 });

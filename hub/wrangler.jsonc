@@ -1,46 +1,31 @@
-// Upbeater Hub（Cloudflare Workers）
+// Upbeater Hub（Cloudflare Workers）— GitHub Actions の代替
 // 本番の D1・R2 の作成と公開は別の段階で行う。database_id は作成後に置き換える。
 //
 // Secret（値は `wrangler secret put <名前>` で投入する。値をこのファイル・ログ・チャットに書かない）
-//   WEBHOOK_SECRET          GitHub Webhook の署名検証用シークレット
-//   MANIFEST_SIGNING_KEYS   マニフェスト署名用の Ed25519 秘密鍵（世代番号つき、JSON）
-//   DOWNLOAD_TOKEN_SECRET   成果物の短期限 URL を署名する鍵
-//   ADMIN_TOKEN             管理 API の暫定トークン（成果物の登録。開発順序3で Builder の認証に置き換える）
-//   GITHUB_APP_PRIVATE_KEY  GitHub App の秘密鍵（PEM。GitHub が配る PKCS#1 のままでよい）
-//   GITHUB_APP_CLIENT_SECRET GitHub App のクライアントシークレット（MCP の OAuth で GitHub ログインに使う）
-//   GITHUB_TOKEN            （任意）GitHub App を使わない場合の暫定トークン
+//   WEBHOOK_SECRET          GitHub Webhook の署名検証
+//   SECRETS_KEY             秘密情報を暗号化する鍵（32 バイトを base64）
+//   ADMIN_TOKEN             管理 API の暫定トークン（開発順序4で MCP に置き換える）
+//   GITHUB_APP_PRIVATE_KEY  GitHub App の秘密鍵（PEM）
+//   MANIFEST_SIGNING_KEYS   端末への配布のマニフェスト署名用の Ed25519 秘密鍵（開発順序6）
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "upbeater-hub",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-01",
   "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "upbeater",
-      "database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "migrations"
-    }
+    { "binding": "DB", "database_name": "upbeater", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }
   ],
-  "r2_buckets": [
-    { "binding": "ARTIFACTS", "bucket_name": "upbeater-artifacts" }
-  ],
-  "durable_objects": {
-    "bindings": [{ "name": "APP_COORDINATOR", "class_name": "AppCoordinator" }]
-  },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AppCoordinator"] }],
-  // 取りこぼし対策の巡回（15 分ごと）
-  "triggers": { "crons": ["*/15 * * * *"] },
+  // ログ・成果物・キャッシュ
+  "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "upbeater-blobs" }],
+  "durable_objects": { "bindings": [{ "name": "REPO_COORDINATOR", "class_name": "RepoCoordinator" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RepoCoordinator"] }],
+  // 毎分：定期実行・心拍の途絶と時間超過・結果表示の再試行・取りこぼしの照合
+  "triggers": { "crons": ["* * * * *"] },
   "vars": {
     "GITHUB_API_BASE": "https://api.github.com",
     "GITHUB_WEB_BASE": "https://github.com",
-    // GitHub App の ID とクライアント ID（公開してよい値。作成後に入れる）
     "GITHUB_APP_ID": "",
-    "GITHUB_APP_CLIENT_ID": "",
-    // MCP を使える GitHub アカウント（ログイン名または数値 ID、カンマ区切り）。空なら誰も接続できない
-    "ALLOWED_GITHUB_USERS": "",
-    // 失効させた署名鍵の世代（カンマ区切り）
-    "MANIFEST_REVOKED_GENERATIONS": "",
-    "ARTIFACT_URL_TTL_SECONDS": "600"
+    "UPBEATER_BOT_LOGIN": "upbeater[bot]",
+    "MANIFEST_REVOKED_GENERATIONS": ""
   }
 }

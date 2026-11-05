@@ -3,8 +3,9 @@ import type { Env } from "./env";
 
 export interface OperationInput {
   owner_id: string;
-  app_id?: string | null;
-  device_id?: string | null;
+  repo_id?: string | null;
+  run_id?: string | null;
+  job_id?: string | null;
   kind: string;
   stage: string;
   status: "ok" | "retry" | "failed";
@@ -16,12 +17,13 @@ export interface OperationInput {
 
 export function operationStatement(env: Env, op: OperationInput, now = Date.now()): D1PreparedStatement {
   return env.DB.prepare(
-    `INSERT INTO operations (owner_id, app_id, device_id, kind, stage, status, reason, retryable, needs_human, detail, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO operations (owner_id, repo_id, run_id, job_id, kind, stage, status, reason, retryable, needs_human, detail, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(
     op.owner_id,
-    op.app_id ?? null,
-    op.device_id ?? null,
+    op.repo_id ?? null,
+    op.run_id ?? null,
+    op.job_id ?? null,
     op.kind,
     op.stage,
     op.status,

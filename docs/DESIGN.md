@@ -112,6 +112,17 @@ Upbeater 自身の検査・公開も Upbeater で行い、Actions は使わな�
 - `repos`・`workflows`（定義の写し）・`runs`・`jobs`・`steps`（ログ本体は R2）・`runners`・`secrets`（暗号化）・`artifacts`
 - 配布用：`releases`・`devices`・`installs`
 - 共通：`operations`（すべての操作の段階・結果・理由）・`webhook_deliveries`
+- 補助（開発順序1で追加）：`schedules`（定期実行の最後の予定時刻。抜けた回を一度だけ補う）・`log_chunks`（ログの断片の索引。本体は R2）・`runner_registration_codes`（一回限りの登録コード）・`check_updates`／`check_runs`（GitHub への結果表示の待ち行列と対応表）
+
+## Hub の処理（開発順序1で実装）
+
+- 定義ファイルの部品（`hub/src/workflow/`）は Workers に依存しない。解析・検証（ファイル名・行・列つきの誤り）・if の式・matrix の展開・cron・合図との照合を持ち、Actions 書式の変換にも使う
+- 合図の処理と状態の遷移は、リポジトリごとの Durable Object（`RepoCoordinator`）で直列に行う。GitHub の障害時は合図を DO の待ち行列に残して再試行する
+- ジョブの状態：`waiting`（needs 待ち）→ `blocked`（concurrency の順番待ち）→ `queued` → `claimed` → `succeeded`・`failed`・`cancelled`・`skipped`
+- concurrency：同じ group で同時に動くのは常に 1 つ。`cancel-in-progress`（既定 true）なら古いものを取り消し、実行中のものには心拍の応答で中断を指示する
+- Runner はジョブを受け取る時にジョブトークンを受け取り、以後の報告に付ける。心拍の途絶で再実行に移ったジョブの古い実行の報告は受け付けない（二重実行の防止）
+- 秘密情報は AES-GCM で暗号化し、ジョブの `secrets` に書かれた分だけ渡す。ログは受け取った時と、つないだ時の両方で伏せる
+- 自分のコミット：送り主が `UPBEATER_BOT_LOGIN` のものは、リポジトリの設定（`trigger_on_own_commits`）が無い限り合図にしない
 
 ## 移行計画
 

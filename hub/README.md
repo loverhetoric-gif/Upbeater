@@ -1,34 +1,51 @@
 # Upbeater Hub
 
-Cloudflare Workers（TypeScript）＋ D1 ＋ R2 ＋ Durable Objects。設計は `../docs/DESIGN.md`、受け入れ条件は `../docs/RESILIENCE.md`。
+GitHub Actions の代替の中枢。Cloudflare Workers（TypeScript）＋ D1 ＋ R2 ＋ Durable Objects ＋ Cron。設計は `../docs/DESIGN.md`、受け入れ条件は `../docs/RESILIENCE-JOBS.md` と `../docs/RESILIENCE.md`。
 
 ## 動作確認
 
 ```sh
 cd hub
-npm install        # .npmrc で legacy-peer-deps を有効にしている（npm の相互依存の解決の不具合を避けるため）
-npm test           # vitest（@cloudflare/vitest-pool-workers）。D1・R2・DO・模擬 GitHub をすべてローカルで起動する
+npm install        # .npmrc で legacy-peer-deps を有効にしている
+npm test           # vitest（@cloudflare/vitest-pool-workers）。D1・R2・DO・模擬 GitHub をローカルで起動する
 npm run typecheck
 ```
 
-テストは本番の資源に一切触れない。署名鍵はテストのたびに使い捨てで生成する。
+テストは本番の資源に触れない。鍵はテストのたびに使い捨てで生成する。
+
+## 構成
+
+| 場所 | 役割 |
+| --- | --- |
+| `src/workflow/` | 定義ファイル（`.upbeater/*.yml`）の解析・検証・式・matrix・cron・合図との照合（Workers に依存しない部品） |
+| `src/routes/webhook.ts` | `POST /webhook/github`：署名の検証、重複の除去、push・pull_request・delete |
+| `src/coordinator.ts` | リポジトリごとの Durable Object：合図の処理、定義ファイルの取得と再試行、状態の遷移を直列に |
+| `src/runs.ts` | run と job の作成、needs の順、matrix、concurrency の取り消しと直列化、再実行・取り消し |
+| `src/routes/runner.ts` | Runner 用 API：登録・受け取り・心拍・ログ・手順・終了の報告 |
+| `src/secrets.ts` | 秘密情報の暗号化と、ログ上の伏せ字（変形を含む） |
+| `src/checks.ts` | GitHub への結果表示（Checks）の待ち行列と再試行 |
+| `src/scheduled.ts` | Cron（毎分）：定期実行・心拍の途絶と時間超過・Runner 不在の通知・取りこぼしの照合・結果表示の再試行 |
+| `src/routes/admin.ts` | 管理 API（暫定。開発順序4で MCP から呼ぶ） |
 
 ## API
 
 | 経路 | 内容 |
 | --- | --- |
-| `POST /mcp` | MCP サーバー（claude.ai のコネクタとして接続する。認証は OAuth） |
-| `/.well-known/oauth-protected-resource`・`/.well-known/oauth-authorization-server` | OAuth のメタデータ |
-| `/oauth/register`・`/oauth/authorize`・`/oauth/token`・`/oauth/revoke` | OAuth 2.1（動的登録・PKCE・トークンの回転） |
-| `POST /webhook/github` | GitHub の Webhook（push）。署名検証・重複除去の後、対象アプリの照合を依頼する |
-| `POST /v1/devices/register` | 登録コード → 端末トークン（`{code, name, os, push_token?}`） |
-| `POST /v1/devices/check` | 端末の現在の通番を受け取り、適用すべき最新版の署名付きマニフェストを返す（`{app_id, current_seq}`） |
-| `POST /v1/devices/report` | 導入結果の報告（`{app_id, seq, status, message?, stage?}`） |
-| `GET /v1/artifacts/:release_id?t=…` | 成果物の取得（短期限トークン、Range 対応） |
-| `GET /v1/keys` | マニフェスト検証用の公開鍵（世代番号と状態つき） |
-| `POST /v1/admin/apps` | アプリの登録（暫定。MCP の `register_app` を使う） |
-| `POST /v1/admin/registration-codes` | 登録コードの発行（暫定。MCP の `create_registration_code` を使う） |
-| `PUT /v1/admin/apps/:app_id/versions/:seq/artifacts/:os` | 成果物の登録（暫定。開発順序3で Builder の完了報告に置き換え） |
+| `POST /webhook/github` | GitHub の Webhook |
+| `POST /v1/runners/register` | 登録コード → Runner トークン |
+| `POST /v1/runners/claim` | ラベルに合うジョブを 1 件受け取る（204 なら無し） |
+| `POST /v1/runners/jobs/:id/heartbeat` | 心拍（`continue: false` なら中断する） |
+| `POST /v1/runners/jobs/:id/logs` | ログの断片 `{chunks:[{seq,text}], last_seq}` → 欠けた通番を返す |
+| `POST /v1/runners/jobs/:id/steps` | 手順ごとの状態 |
+| `POST /v1/runners/jobs/:id/complete` | 終了の報告 `{conclusion, reason, last_seq}` → 欠けた通番を返す |
+| `POST /v1/admin/repos` | リポジトリの登録 |
+| `PUT・GET /v1/admin/secrets` | 秘密情報の登録・名前の一覧（値は返さない） |
+| `POST /v1/admin/runner-codes` | Runner の登録コード |
+| `POST /v1/admin/runs` | 手動実行 |
+| `GET /v1/admin/runs/:id`・`POST …/cancel`・`POST …/rerun` | 状況・取り消し・失敗したジョブの再実行 |
+| `GET /v1/admin/jobs/:id/logs` | ログ（通番の順。欠落は印、秘密情報は伏せ字） |
+
+Runner のジョブごとの報告には、受け取った時の `job_token` を `x-upbeater-job-token` で付ける。
 
 ## Secret（名前と置き場所のみ。値はここに書かない）
 
@@ -36,33 +53,14 @@ npm run typecheck
 
 | 名前 | 用途 |
 | --- | --- |
-| `WEBHOOK_SECRET` | GitHub Webhook の署名検証。未設定の間は Webhook を受け付けない |
-| `MANIFEST_SIGNING_KEYS` | Ed25519 秘密鍵（JWK）を世代番号つきで並べた JSON：`{"active":2,"keys":[{"gen":1,"jwk":{…}},{"gen":2,"jwk":{…}}]}` |
-| `DOWNLOAD_TOKEN_SECRET` | 成果物の短期限 URL の署名 |
-| `ADMIN_TOKEN` | 管理 API の暫定トークン（成果物の登録） |
+| `WEBHOOK_SECRET` | GitHub Webhook の署名検証。未設定の間は受け付けない |
+| `SECRETS_KEY` | 秘密情報を暗号化する鍵（32 バイトを base64） |
+| `ADMIN_TOKEN` | 管理 API の暫定トークン |
 | `GITHUB_APP_PRIVATE_KEY` | GitHub App の秘密鍵（PEM。PKCS#1 のままでよい） |
-| `GITHUB_APP_CLIENT_SECRET` | GitHub App のクライアントシークレット（MCP 接続時の GitHub ログイン） |
-| `GITHUB_TOKEN` | （任意）GitHub App を使わない場合の暫定トークン |
+| `MANIFEST_SIGNING_KEYS` | 端末への配布のマニフェスト署名（開発順序6） |
 
-設定値（`wrangler.jsonc` の `vars`）：`GITHUB_API_BASE`、`GITHUB_WEB_BASE`、`GITHUB_APP_ID`、`GITHUB_APP_CLIENT_ID`、`ALLOWED_GITHUB_USERS`（MCP を使える GitHub アカウント）、`MANIFEST_REVOKED_GENERATIONS`（失効させた世代。カンマ区切り）、`ARTIFACT_URL_TTL_SECONDS`。
-
-## GitHub App の設定（公開時）
-
-- 権限（Repository）：Contents 読み書き、Pull requests 読み書き、Metadata 読み取り、Checks 読み取り、Commit statuses 読み取り
-- Webhook：push イベント、送り先 `https://<Hub>/webhook/github`、シークレットは `WEBHOOK_SECRET`
-- ユーザー認証の Callback URL：`https://<Hub>/oauth/github/callback`
-- 配信・操作したいリポジトリに App をインストールする
-
-## claude.ai への接続
-
-claude.ai の「設定 → コネクタ → カスタムコネクタを追加」で `https://<Hub>/mcp` を指定する。GitHub でのログインと同意の画面を経て接続される。
-
-### 署名鍵の世代交代
-
-1. 新しい世代の鍵を `keys` に追加し、`active` を新しい世代にする（旧世代は残す）
-2. 端末が新しい公開鍵を受け取ったら、旧世代を `keys` から外す
-3. 漏えい時は、その世代を `MANIFEST_REVOKED_GENERATIONS` に加える。端末はその世代の署名を拒否する
+設定値（`wrangler.jsonc` の `vars`）：`GITHUB_API_BASE`・`GITHUB_WEB_BASE`・`GITHUB_APP_ID`・`UPBEATER_BOT_LOGIN`（自分のコミットを見分けるためのログイン名）・`MANIFEST_REVOKED_GENERATIONS`。
 
 ## 公開（今回は行っていない）
 
-D1・R2 の作成、`database_id` の置き換え、`wrangler d1 migrations apply`、Secret の投入、`wrangler deploy` は別の段階で行う。GitHub Actions は使わない。
+GitHub App の作成（Webhook：push・pull_request・delete、権限：Checks 書き込み・Contents 読み取り・Metadata 読み取り）、D1・R2 の作成、`database_id` の置き換え、`wrangler d1 migrations apply`、Secret の投入、`wrangler deploy`。GitHub Actions も self-hosted runner も使わない。

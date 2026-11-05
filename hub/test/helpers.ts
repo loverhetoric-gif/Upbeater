@@ -1,130 +1,132 @@
-import { env, runDurableObjectAlarm, runInDurableObject, SELF } from "cloudflare:test";
+import { env, runInDurableObject, SELF } from "cloudflare:test";
 import { hmacSha256, toHex } from "../src/crypto";
+import worker from "../src/index";
+import { createExecutionContext, createScheduledController, waitOnExecutionContext } from "cloudflare:test";
 
 export const ORIGIN = "https://hub.test";
 const MOCK = "https://github-mock.test";
+export const OWNER = "owner1";
+export const REPO = "acme/widget";
 
-/** 40 桁のコミット SHA を作る */
-export function sha(n: number | string): string {
-  return toHex(new TextEncoder().encode(String(n).padStart(20, "0"))).slice(0, 40);
+let n = 0;
+/** 40 桁のコミット SHA */
+export const sha = (label: string | number) => toHex(new TextEncoder().encode(`c-${label}`.padEnd(20, "."))).slice(0, 40);
+
+export async function mock(path: string, body: unknown = {}): Promise<any> {
+  const r = await env.GITHUB_API!.fetch(`${MOCK}/__mock/${path}`, { method: "POST", body: JSON.stringify(body) });
+  return r.json();
 }
 
-export const mock = {
-  async setHead(repo: string, branch: string, commit: string | null) {
-    await env.GITHUB_API!.fetch(`${MOCK}/__mock/branch`, { method: "POST", body: JSON.stringify({ repo, branch, sha: commit }) });
-  },
-  async fail(count: number, status: number, headers: Record<string, string> = {}) {
-    await env.GITHUB_API!.fetch(`${MOCK}/__mock/fail`, { method: "POST", body: JSON.stringify({ count, status, headers }) });
-  },
-  async delay(ms: number) {
-    await env.GITHUB_API!.fetch(`${MOCK}/__mock/delay`, { method: "POST", body: JSON.stringify({ ms }) });
-  },
-  async calls(): Promise<number> {
-    const r = await env.GITHUB_API!.fetch(`${MOCK}/__mock/calls`);
-    return ((await r.json()) as { calls: number }).calls;
-  },
-};
+/** 模擬 GitHub にコミット（定義ファイル）を置く */
+export async function commit(label: string, files: Record<string, string>, opts: { branch?: string | null; repo?: string } = {}) {
+  const s = sha(label);
+  await mock("commit", { repo: opts.repo ?? REPO, branch: opts.branch === undefined ? "main" : opts.branch, sha: s, files });
+  return s;
+}
 
-let deliverySeq = 0;
-export async function sendWebhook(
-  payload: unknown,
-  opts: { event?: string; delivery?: string; secret?: string; signature?: string | null; rawBody?: string } = {},
-): Promise<Response> {
-  const body = opts.rawBody ?? JSON.stringify(payload);
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    "x-github-event": opts.event ?? "push",
-    "x-github-delivery": opts.delivery ?? `delivery-${Date.now()}-${++deliverySeq}`,
-  };
+export async function admin(method: string, path: string, body?: unknown): Promise<Response> {
+  return SELF.fetch(`${ORIGIN}${path}`, {
+    method,
+    headers: { authorization: "Bearer test-admin-token", "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+export async function registerRepo(opts: { repo?: string; trigger_on_own_commits?: boolean } = {}): Promise<string> {
+  const r = await admin("POST", "/v1/admin/repos", { owner_id: OWNER, repo: opts.repo ?? REPO, ...(opts.trigger_on_own_commits ? { trigger_on_own_commits: true } : {}) });
+  if (r.status !== 201) throw new Error(`登録に失敗：${r.status} ${await r.text()}`);
+  return ((await r.json()) as { id: string }).id;
+}
+
+export async function webhook(event: string, payload: unknown, opts: { delivery?: string; secret?: string; signature?: string | null } = {}): Promise<Response> {
+  const body = JSON.stringify(payload);
+  const headers: Record<string, string> = { "content-type": "application/json", "x-github-event": event, "x-github-delivery": opts.delivery ?? `d-${Date.now()}-${++n}` };
   const sig = opts.signature === undefined ? "sha256=" + toHex(await hmacSha256(opts.secret ?? "test-webhook-secret", body)) : opts.signature;
   if (sig !== null) headers["x-hub-signature-256"] = sig;
   return SELF.fetch(`${ORIGIN}/webhook/github`, { method: "POST", headers, body });
 }
 
-export function pushPayload(repo: string, branch: string, after: string) {
-  return { ref: `refs/heads/${branch}`, after, repository: { full_name: repo } };
+export function push(s: string, opts: { branch?: string; sender?: string; repo?: string; files?: string[] } = {}) {
+  return {
+    ref: `refs/heads/${opts.branch ?? "main"}`,
+    after: s,
+    repository: { full_name: opts.repo ?? REPO },
+    sender: { login: opts.sender ?? "alice" },
+    pusher: { name: opts.sender ?? "alice" },
+    commits: opts.files ? [{ added: opts.files, modified: [], removed: [] }] : [],
+  };
 }
 
-export async function admin(method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<Response> {
-  const isBinary = body instanceof Uint8Array;
-  return SELF.fetch(`${ORIGIN}${path}`, {
-    method,
-    headers: { authorization: "Bearer test-admin-token", ...(isBinary ? {} : { "content-type": "application/json" }), ...headers },
-    body: body === undefined ? undefined : isBinary ? body : JSON.stringify(body),
-  });
+export function pullRequest(s: string, opts: { fork?: boolean; base?: string } = {}) {
+  return {
+    action: "opened",
+    repository: { full_name: REPO },
+    sender: { login: "bob" },
+    pull_request: { head: { sha: s, ref: "feature", repo: { full_name: opts.fork ? "evil/widget" : REPO } }, base: { ref: opts.base ?? "main", repo: { full_name: REPO } } },
+  };
 }
 
-export async function createApp(opts: { id?: string; owner?: string; repo?: string; branch?: string; os?: string[] } = {}) {
-  const id = opts.id ?? "app1";
-  const res = await admin("POST", "/v1/admin/apps", {
-    id,
-    owner_id: opts.owner ?? "owner1",
-    name: id,
-    repo: opts.repo ?? "Example/Repo",
-    branch: opts.branch ?? "main",
-    kind: "build",
-    target_os: opts.os ?? ["android", "linux"],
-  });
-  if (res.status !== 201) throw new Error(`アプリの登録に失敗：${res.status} ${await res.text()}`);
-  return id;
+/** push を送り、作られた run を返す */
+export async function pushAndRun(label: string, files: Record<string, string>) {
+  const s = await commit(label, files);
+  const r = await webhook("push", push(s));
+  return { sha: s, res: r, body: (await r.json()) as any };
 }
 
-export async function versions(appId: string) {
-  const r = await env.DB.prepare("SELECT seq, commit_sha, source FROM app_versions WHERE app_id = ? ORDER BY seq").bind(appId).all<{
-    seq: number;
-    commit_sha: string;
-    source: string;
-  }>();
-  return r.results;
+export async function runs() {
+  return (await env.DB.prepare("SELECT * FROM runs ORDER BY number").all<any>()).results;
 }
 
-export function coordinator(appId: string) {
-  return env.APP_COORDINATOR.get(env.APP_COORDINATOR.idFromName(appId));
+export async function jobsOf(runId?: string) {
+  const q = runId ? env.DB.prepare("SELECT * FROM jobs WHERE run_id = ? ORDER BY created_at").bind(runId) : env.DB.prepare("SELECT * FROM jobs ORDER BY created_at");
+  return (await q.all<any>()).results;
 }
 
-export async function runAlarm(appId: string): Promise<boolean> {
-  return runDurableObjectAlarm(coordinator(appId));
+export const statusMap = async (runId?: string) => Object.fromEntries((await jobsOf(runId)).map((j) => [j.name, j.status]));
+
+/** Runner を登録してトークンを返す */
+export async function registerRunner(labels: string[] = ["linux"], name = "runner-1"): Promise<string> {
+  const { code } = (await (await admin("POST", "/v1/admin/runner-codes", { owner_id: OWNER })).json()) as { code: string };
+  const r = await SELF.fetch(`${ORIGIN}/v1/runners/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code, name, labels }) });
+  if (r.status !== 201) throw new Error(`Runner の登録に失敗：${r.status}`);
+  return ((await r.json()) as { token: string }).token;
 }
 
-export async function coordinatorState(appId: string) {
-  return runInDurableObject(coordinator(appId), async (_i, state) => ({
-    alarm: await state.storage.getAlarm(),
-    attempt: (await state.storage.get<number>("attempt")) ?? 0,
-    blockedUntil: (await state.storage.get<number>("blocked_until")) ?? 0,
-    dirty: (await state.storage.get<boolean>("dirty")) ?? false,
-  }));
+export async function claim(token: string, labels?: string[]) {
+  const r = await SELF.fetch(`${ORIGIN}/v1/runners/claim`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(labels ? { labels } : {}) });
+  return { status: r.status, body: r.status === 204 ? null : ((await r.json()) as any) };
 }
 
-export async function registerDevice(owner = "owner1", os = "android") {
-  const codeRes = await admin("POST", "/v1/admin/registration-codes", { owner_id: owner });
-  const { code } = (await codeRes.json()) as { code: string };
-  const res = await SELF.fetch(`${ORIGIN}/v1/devices/register`, {
+export async function jobCall(token: string, jobId: string, jobToken: string, what: string, body: unknown = {}) {
+  const r = await SELF.fetch(`${ORIGIN}/v1/runners/jobs/${jobId}/${what}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ code, name: "端末", os }),
-  });
-  if (res.status !== 201) throw new Error(`端末の登録に失敗：${res.status}`);
-  return (await res.json()) as { device_id: string; token: string };
-}
-
-export async function deviceCall(token: string, path: string, body: unknown): Promise<Response> {
-  return SELF.fetch(`${ORIGIN}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    headers: { authorization: `Bearer ${token}`, "x-upbeater-job-token": jobToken, "content-type": "application/json" },
     body: JSON.stringify(body),
   });
+  return { status: r.status, body: (await r.json()) as any };
 }
 
-export async function upload(appId: string, seq: number, os: string, bytes: Uint8Array) {
-  const res = await admin("PUT", `/v1/admin/apps/${appId}/versions/${seq}/artifacts/${os}`, bytes);
-  if (res.status !== 201) throw new Error(`成果物の登録に失敗：${res.status} ${await res.text()}`);
-  return (await res.json()) as { id: string; sha256: string; size: number };
+/** 受け取ったジョブを終える */
+export async function finish(token: string, claimed: any, conclusion: "success" | "failure" | "cancelled" = "success") {
+  return jobCall(token, claimed.job.id, claimed.job_token, "complete", { conclusion, last_seq: 0 });
 }
 
-/** Webhook を送り、アプリの照合が終わるまで待つ */
-export async function pushAndSync(appId: string, repo: string, branch: string, commit: string) {
-  await mock.setHead(repo, branch, commit);
-  const res = await sendWebhook(pushPayload(repo, branch, commit));
-  if (res.status !== 202) throw new Error(`Webhook の受信に失敗：${res.status}`);
-  return (await res.json()) as { outcomes: Record<string, string> };
+export async function runCronAt(now?: number) {
+  const { runCron } = await import("../src/scheduled");
+  await runCron(env, now);
+}
+
+export async function scheduledHandler() {
+  const ctx = createExecutionContext();
+  await worker.scheduled(createScheduledController({ cron: "* * * * *" }), env, ctx);
+  await waitOnExecutionContext(ctx);
+}
+
+export async function coordinatorStorage(repoId: string) {
+  const stub = env.REPO_COORDINATOR.get(env.REPO_COORDINATOR.idFromName(repoId));
+  return runInDurableObject(stub, async (_i, state) => ({ pending: (await state.storage.get<any[]>("pending")) ?? [], alarm: await state.storage.getAlarm() }));
+}
+
+export function coordinatorStub(repoId: string) {
+  return env.REPO_COORDINATOR.get(env.REPO_COORDINATOR.idFromName(repoId));
 }
