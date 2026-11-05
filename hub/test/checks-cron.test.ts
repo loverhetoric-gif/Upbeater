@@ -18,6 +18,22 @@ describe("GitHub への結果表示", () => {
     expect(c.updates.at(-1)).toMatchObject({ status: "completed", conclusion: "success" });
   });
 
+  it("Checks の権限が無い（403）時は、コミットの状態で代わりに表示し、人の判断が要るものとして 1 度だけ記録する", async () => {
+    await registerRepo();
+    const t = await registerRunner(["linux"]);
+    await mock("fail", { count: 100, status: 403, path: "/check-runs" });
+    const { sha } = await pushAndRun("a", { ".upbeater/ci.yml": ONE });
+    await finish(t, (await claim(t)).body);
+    await flushChecks(env, { now: Date.now() + 60 * 60_000 });
+    const st = await mock("statuses");
+    expect(st.length).toBeGreaterThan(0);
+    expect(st.at(-1)).toMatchObject({ sha, context: "Upbeater / .upbeater/ci.yml / build", state: "success" });
+    expect(st[0].state).toBe("pending");
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM check_updates").first<{ n: number }>()).toMatchObject({ n: 0 });
+    const ops = await env.DB.prepare("SELECT status, needs_human FROM operations WHERE kind = 'checks'").all<{ status: string; needs_human: number }>();
+    expect(ops.results).toEqual([{ status: "ok", needs_human: 1 }]);
+  });
+
   it("表示に失敗しても実行は止めず、間隔を広げて再試行し、最新の状態だけを送る", async () => {
     await registerRepo();
     const t = await registerRunner(["linux"]);

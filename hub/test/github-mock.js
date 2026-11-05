@@ -10,6 +10,7 @@ function reset() {
     tokens: new Set(),
     uninstalled: new Set(),
     checks: [], // { id, repo, created: payload, updates: [payload] }
+    statuses: [], // { repo, sha, ...payload }
     nextCheck: 1,
     calls: { head: 0, contents: 0, checks: 0 },
   };
@@ -54,6 +55,7 @@ export default {
           return json({ ok: true });
         case "/__mock/checks": return json(S.checks.filter((c) => !body.repo || c.repo === body.repo.toLowerCase()));
         case "/__mock/calls": return json(S.calls);
+        case "/__mock/statuses": return json(S.statuses.filter((c) => !body.repo || c.repo === body.repo.toLowerCase()));
         case "/__mock/uninstall": S.uninstalled.add(body.repo.toLowerCase()); return json({ ok: true });
       }
       return json({ error: "unknown" }, 404);
@@ -96,6 +98,10 @@ export default {
         return list.length ? json(list.map((f) => ({ type: "file", name: f.slice(10), path: f }))) : json({ message: "Not Found" }, 404);
       }
       return path in files ? new Response(files[path]) : json({ message: "Not Found" }, 404);
+    }
+    if ((m = /^\/statuses\/([0-9a-f]+)$/.exec(rest)) && method === "POST") {
+      S.statuses.push({ repo, sha: m[1], ...body });
+      return json({ id: S.statuses.length }, 201);
     }
     if (rest === "/check-runs" && method === "POST") {
       S.calls.checks++;

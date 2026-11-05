@@ -67,7 +67,14 @@ else
 fi
 
 # 4. 常駐（ログイン時に起動し、落ちたら起動し直す）
-./upbeater-runner service install >/dev/null || die "常駐の設定に失敗しました"
+#    Runner 専用の道具（~/.upbeater/tools/<名前>/）があれば、その bin を Runner の PATH の先頭に足す
+#    （普段使いの道具の版を変えずに、定義が求める版を Runner にだけ用意できる）
+TOOLS=""
+for b in "$HOME"/.upbeater/tools/*/bin "$HOME"/.upbeater/tools/*/Contents/Home/bin; do
+  [ -d "$b" ] && TOOLS="$TOOLS$b:"
+done
+[ -n "$TOOLS" ] && say "Runner 専用の道具：$(printf '%s' "$TOOLS" | tr ':' '\n' | sed -n 's#.*/tools/\([^/]*\)/.*#\1#p' | sort -u | tr '\n' ' ')"
+PATH="$TOOLS$PATH" ./upbeater-runner service install >/dev/null || die "常駐の設定に失敗しました"
 say "常駐させました"
 
 printf '\n完了しました。この Mac は Upbeater のジョブを受け取れる状態です。\n'

@@ -175,7 +175,7 @@ var tools = map[string]tool{
 	"setup-java":    {"java -version 2>&1", []string{"java-version"}},
 	"setup-go":      {"go version", []string{"go-version"}},
 	"setup-python":  {"python3 --version 2>&1 || python --version 2>&1", []string{"python-version"}},
-	"setup-flutter": {"flutter --version 2>&1 | head -n 1", []string{"flutter-version"}},
+	"setup-flutter": {"flutter --version 2>&1 | grep -m 1 '^Flutter '", []string{"flutter-version"}}, // 「新しい版があります」の案内が先に出ることがある
 }
 
 // setupTool は道具が入っていて、指定の版に合うかを確かめる（Runner の端末・コンテナに入れておく方式）。
