@@ -77,6 +77,18 @@ export async function handleAdmin(req: Request, env: Env, p: string): Promise<Re
     ]);
     return json({ token, name }, 201);
   }
+  if (p === "/v1/admin/oauth-preapprovals" && m === "POST") {
+    const b = await readJson(req);
+    const owner = str(b.owner_id, "owner_id", { pattern: ID });
+    const minutes = Math.min(Math.max(typeof b.minutes === "number" ? b.minutes : 30, 1), 240);
+    const now = Date.now();
+    await env.DB.batch([
+      // 使っていない前の許可は取り消す（同時に許可が残らないように）
+      env.DB.prepare("UPDATE oauth_preapprovals SET used_at = ? WHERE used_at IS NULL").bind(now),
+      env.DB.prepare("INSERT INTO oauth_preapprovals (id, owner_id, expires_at, created_at) VALUES (?, ?, ?, ?)").bind(crypto.randomUUID(), owner, now + minutes * 60_000, now),
+    ]);
+    return json({ expires_at: now + minutes * 60_000 }, 201);
+  }
   if (p === "/v1/admin/secrets" && m === "GET") {
     const owner = str(new URL(req.url).searchParams.get("owner_id"), "owner_id", { pattern: ID });
     const r = await env.DB.prepare("SELECT s.name, COALESCE(r.full_name, '') AS repo, s.updated_at FROM secrets s LEFT JOIN repos r ON r.id = s.repo_id WHERE s.owner_id = ? ORDER BY s.name")

@@ -8,6 +8,7 @@
  *   node scripts/admin.mjs secret <名前> [--repo owner/name]    秘密情報を登録する（値は伏せて入力）
  *   node scripts/admin.mjs secret-form [--repo owner/name] <名前>…   秘密情報の入力ページ（スマホで開ける・一回限り・期限なし。同じリポジトリの前のページは使えなくなる）を発行する
  *   node scripts/admin.mjs run <owner/name> <定義ファイル>       手動実行（例 .upbeater/ci.yml）
+ *   node scripts/admin.mjs mcp-approve [--minutes 30]          claude.ai のコネクタの次の接続を 1 回だけ許可する（GitHub でのログインなし）
  *   node scripts/admin.mjs mcp-connect [--owner ログイン名]     Upbeater の MCP をこの PC の Claude Code に登録する（トークンは画面に出さない）
  */
 import { spawnSync } from "node:child_process";
@@ -115,6 +116,12 @@ switch (cmd) {
     if (!rest[1]) fail("定義ファイルを指定してください（例 .upbeater/ci.yml）");
     const r = await call("POST", "/v1/admin/runs", { owner_id: await ownerId(repo.split("/")[0]), repo, workflow: rest[1] });
     console.log(`手動実行：${r.status}${r.runs ? `（実行 #${r.runs.map((x) => x.number).join("・#")}）` : ""}`);
+    break;
+  }
+  case "mcp-approve": {
+    const minutes = Number(opt("minutes") ?? "30");
+    await call("POST", "/v1/admin/oauth-preapprovals", { owner_id: await ownerId(opt("owner") ?? "loverhetoric-gif"), minutes });
+    console.log(`claude.ai のコネクタの次の接続を 1 回だけ許可しました（${minutes} 分以内）。\nコネクタの URL：${store.hub_url}/mcp`);
     break;
   }
   case "mcp-connect": {
