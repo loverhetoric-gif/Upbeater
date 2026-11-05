@@ -7,7 +7,7 @@
  * - GET  /v1/admin/runs/:id                   実行の状況（ジョブ・手順）
  * - POST /v1/admin/runs/:id/cancel|rerun      取り消し・失敗したジョブの再実行
  * - GET  /v1/admin/jobs/:id/logs              ログ（通番の順。秘密情報は伏せる）
- * - POST /v1/admin/secret-forms               秘密情報の入力ページ（一回限り・30 分）を発行する
+ * - POST /v1/admin/secret-forms               秘密情報の入力ページ（一回限り・期限なし）を発行する
  */
 import { coordinatorCall, type EventOutcome } from "../coordinator";
 import { randomCode, sha256Hex, timingSafeEqual } from "../crypto";

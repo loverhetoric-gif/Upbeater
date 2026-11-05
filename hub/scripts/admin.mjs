@@ -6,7 +6,7 @@
  *   node scripts/admin.mjs repo <owner/name> [--branch main]   リポジトリを登録する
  *   node scripts/admin.mjs runner-code                          Runner の登録コード（15 分・一回限り）
  *   node scripts/admin.mjs secret <名前> [--repo owner/name]    秘密情報を登録する（値は伏せて入力）
- *   node scripts/admin.mjs secret-form [--repo owner/name] <名前>…   秘密情報の入力ページ（スマホで開ける・一回限り・30 分）を発行する
+ *   node scripts/admin.mjs secret-form [--repo owner/name] <名前>…   秘密情報の入力ページ（スマホで開ける・一回限り・期限なし。同じリポジトリの前のページは使えなくなる）を発行する
  *   node scripts/admin.mjs run <owner/name> <定義ファイル>       手動実行（例 .upbeater/ci.yml）
  */
 import { readFileSync } from "node:fs";
@@ -105,7 +105,7 @@ switch (cmd) {
     if (names.length === 0 || names.some((n) => !/^[A-Z_][A-Z0-9_]*$/.test(n))) fail("名前を英大文字・数字・_ で 1 つ以上指定してください");
     const login = (repo ?? "loverhetoric-gif/x").split("/")[0];
     const r = await call("POST", "/v1/admin/secret-forms", { owner_id: await ownerId(login), names, ...(repo ? { repo: repoArg(repo) } : {}) });
-    console.log(`入力ページ（一回限り・${new Date(r.expires_at).toLocaleTimeString("ja-JP")} まで）：\n${r.url}`);
+    console.log(`入力ページ（一回限り・期限なし）：\n${r.url}`);
     break;
   }
   case "run": {
