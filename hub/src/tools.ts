@@ -7,6 +7,7 @@ import { APP_KINDS, SUPPORTED_OS, type AppRow, type Env } from "./env";
 import { createGitHubClient, GitHubError, type GitHubClient } from "./github";
 import { checkBranchName, checkRepoName, commitFilesOp, createBranchOp, mergePrOp, openPrOp, OpError, shipChangeOp, type FileChange, type OpContext, type OpResult } from "./gitops";
 import { operationStatement, recordOperation } from "./operations";
+import { createBuilder } from "./routes/builder";
 
 // ───────── 入力の検証（JSON Schema の部分集合） ─────────
 
@@ -89,6 +90,21 @@ const fileSchema: Schema = {
     },
     required: ["path"],
   },
+};
+const stepSchema: Schema = {
+  type: "object",
+  description: "この OS のビルド手順",
+  properties: {
+    requires: { type: "array", items: { type: "string", maxLength: 100 }, maxItems: 30, description: "必要な道具（開始前に有無を点検する。例：flutter, java）" },
+    build: { type: "array", items: { type: "string", maxLength: 2000 }, maxItems: 30, description: "順に実行するコマンド（リポジトリの直下で実行）" },
+    artifact: { type: "string", maxLength: 400, description: "成果物のパス（リポジトリ内の相対パス。フォルダなら tar.gz にまとめる。既定は「.」＝リポジトリの内容）" },
+    timeout_minutes: { type: "integer", minimum: 1, description: "上限の時間（分、既定 60、最大 180）" },
+  },
+};
+const stepsSchema: Schema = {
+  type: "object",
+  description: "OS ごとのビルド手順（build・direct のとき Builder が使う）",
+  properties: { android: stepSchema, ios: stepSchema, macos: stepSchema, linux: stepSchema },
 };
 const mergeMethod: Schema = { type: "string", enum: ["squash", "merge", "rebase"], description: "マージの方法（既定は squash）" };
 
@@ -191,6 +207,7 @@ export const TOOLS: Tool[] = [
         branch: str("対象ブランチ（既定はリポジトリの既定ブランチ）"),
         kind: { type: "string", enum: APP_KINDS, description: "direct：そのまま配る／build：Builder がビルド／release：GitHub Releases の成果物" },
         target_os: { type: "array", items: { type: "string", enum: SUPPORTED_OS }, maxItems: 4, description: "対象 OS" },
+        install_steps: stepsSchema,
       },
       required: ["name", "repo", "kind", "target_os"],
     },
@@ -212,8 +229,8 @@ export const TOOLS: Tool[] = [
       await ctx.env.DB.batch([
         ctx.env.DB.prepare(
           `INSERT INTO apps (id, owner_id, name, repo_full_name, branch, kind, target_os, install_steps, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)`,
-        ).bind(id, ctx.owner_id, a.name, fullName, branch, a.kind, JSON.stringify(os), now, now),
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).bind(id, ctx.owner_id, a.name, fullName, branch, a.kind, JSON.stringify(os), JSON.stringify(a.install_steps ?? {}), now, now),
         ctx.env.DB.prepare("INSERT OR IGNORE INTO repo_allowlist (owner_id, repo_full_name, created_at) VALUES (?, ?, ?)").bind(ctx.owner_id, fullName, now),
         operationStatement(ctx.env, { owner_id: ctx.owner_id, app_id: id, kind: "app", stage: "register", status: "ok", detail: { repo: fullName, branch } }, now),
       ]);
@@ -408,6 +425,72 @@ export const TOOLS: Tool[] = [
     annotations: { destructiveHint: true },
     async run(ctx, a) {
       return shipChangeOp(opCtx(ctx), a as Parameters<typeof shipChangeOp>[1]);
+    },
+  },
+  {
+    name: "set_build_steps",
+    title: "ビルド手順の設定",
+    description: "アプリの OS ごとのビルド手順（必要な道具・コマンド・成果物のパス）を設定する。次の版から使われる",
+    inputSchema: { type: "object", properties: { app_id: str("アプリの ID"), install_steps: stepsSchema }, required: ["app_id", "install_steps"] },
+    annotations: { idempotentHint: true },
+    async run(ctx, a) {
+      const app = await ownedApp(ctx, a.app_id as string);
+      await ctx.env.DB.prepare("UPDATE apps SET install_steps = ?, updated_at = ? WHERE id = ?").bind(JSON.stringify(a.install_steps), Date.now(), app.id).run();
+      return { ok: true, app_id: app.id, install_steps: a.install_steps };
+    },
+  },
+  {
+    name: "create_builder",
+    title: "Builder の登録",
+    description: "Builder（ビルド機）を登録し、接続用のトークンを発行する。トークンはこの応答でしか表示されないため、Builder の設定ファイルに保存する",
+    inputSchema: { type: "object", properties: { name: str("Builder の名前（例：自宅の Mac）", 100) }, required: ["name"] },
+    async run(ctx, a) {
+      const b = await createBuilder(ctx.env, ctx.owner_id, a.name as string);
+      return { ok: true, ...b, note: "トークンは Builder の ~/.upbeater/builder.token に保存してください（他の人に見せない）" };
+    },
+  },
+  {
+    name: "list_builders",
+    title: "Builder の一覧",
+    description: "登録した Builder と最終接続・ビルドできる OS",
+    inputSchema: { type: "object", properties: {} },
+    annotations: { readOnlyHint: true },
+    async run(ctx) {
+      const r = await ctx.env.DB.prepare("SELECT id, name, os, created_at, last_seen_at, revoked_at FROM builders WHERE owner_id = ? ORDER BY name").bind(ctx.owner_id).all<{ os: string }>();
+      return { ok: true, builders: r.results.map((b) => ({ ...b, os: JSON.parse(b.os) })) };
+    },
+  },
+  {
+    name: "list_builds",
+    title: "ビルドの記録",
+    description: "ビルド指示の状況（待ち・実行中・成功・失敗・取り消し）。失敗は段階・理由・末尾ログを返す",
+    inputSchema: {
+      type: "object",
+      properties: {
+        app_id: str("アプリの ID"),
+        status: { type: "string", enum: ["queued", "claimed", "succeeded", "failed", "cancelled"], description: "状態で絞り込む" },
+        include_log: { type: "boolean", description: "末尾ログを含める（既定は失敗のときだけ含める）" },
+        limit: int("件数（既定 20、最大 100）", 1),
+      },
+    },
+    annotations: { readOnlyHint: true },
+    async run(ctx, a) {
+      const where = ["j.owner_id = ?"];
+      const binds: unknown[] = [ctx.owner_id];
+      if (a.app_id) (where.push("j.app_id = ?"), binds.push(a.app_id));
+      if (a.status) (where.push("j.status = ?"), binds.push(a.status));
+      const limit = Math.min((a.limit as number | undefined) ?? 20, 100);
+      const r = await ctx.env.DB.prepare(
+        `SELECT j.id, j.app_id, ap.name AS app_name, j.seq, j.commit_sha, j.os, j.status, j.attempt, j.stage, j.reason, j.log_tail, b.name AS builder, j.created_at, j.updated_at
+         FROM build_jobs j JOIN apps ap ON ap.id = j.app_id LEFT JOIN builders b ON b.id = j.builder_id
+         WHERE ${where.join(" AND ")} ORDER BY j.created_at DESC, j.id LIMIT ${limit}`,
+      )
+        .bind(...binds)
+        .all<{ status: string; log_tail: string | null }>();
+      return {
+        ok: true,
+        builds: r.results.map((j) => (a.include_log || j.status === "failed" ? j : { ...j, log_tail: undefined })),
+      };
     },
   },
   {

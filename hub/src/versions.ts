@@ -73,13 +73,29 @@ export async function syncApp(env: Env, gh: GitHubClient, appId: string, source:
       seq,
     ),
   ];
+  // 古い版のビルド指示は取り消す（待ち行列にはアプリごとに最新だけを残す。実行中のものは Builder が次の連絡で中断する）
+  stmts.push(
+    env.DB.prepare(
+      "UPDATE build_jobs SET status = 'cancelled', reason = '新しい版に置き換わりました', updated_at = ? WHERE app_id = ? AND seq < ? AND status IN ('queued', 'claimed')",
+    ).bind(now, app.id, seq),
+  );
   for (const os of targetOs(app)) {
+    const releaseId = crypto.randomUUID();
     stmts.push(
       env.DB.prepare(
         `INSERT INTO releases (id, owner_id, app_id, seq, commit_sha, os, status, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-      ).bind(crypto.randomUUID(), app.owner_id, app.id, seq, head, os, now, now),
+      ).bind(releaseId, app.owner_id, app.id, seq, head, os, now, now),
     );
+    // build・direct は Builder が成果物を作る（release は GitHub Releases の成果物を使うため指示を出さない）
+    if (app.kind !== "release") {
+      stmts.push(
+        env.DB.prepare(
+          `INSERT INTO build_jobs (id, owner_id, app_id, release_id, seq, commit_sha, os, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
+        ).bind(crypto.randomUUID(), app.owner_id, app.id, releaseId, seq, head, os, now, now),
+      );
+    }
   }
   stmts.push(
     operationStatement(

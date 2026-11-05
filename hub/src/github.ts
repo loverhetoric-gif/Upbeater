@@ -349,13 +349,14 @@ export function githubFetch(env: Env): FetchLike {
   return binding ? (u, i) => binding.fetch(u, i) : (u, i) => fetch(u, i);
 }
 
-export function createGitHubClient(env: Env): GitHubClient {
+/** GitHub App が設定されていればインストールトークン、なければ暫定トークン（または認証なし） */
+export function createGitHubTokenProvider(env: Env): GitHubTokenProvider {
   const base = env.GITHUB_API_BASE || "https://api.github.com";
-  const f = githubFetch(env);
-  // GitHub App が設定されていればインストールトークン、なければ暫定トークン（または認証なし）
-  const tokens: GitHubTokenProvider =
-    env.GITHUB_APP_ID && env.GITHUB_APP_PRIVATE_KEY
-      ? new GitHubAppTokenProvider(f, base, env.GITHUB_APP_ID, env.GITHUB_APP_PRIVATE_KEY)
-      : new StaticTokenProvider(env.GITHUB_TOKEN);
-  return new HttpGitHubClient(f, base, tokens);
+  return env.GITHUB_APP_ID && env.GITHUB_APP_PRIVATE_KEY
+    ? new GitHubAppTokenProvider(githubFetch(env), base, env.GITHUB_APP_ID, env.GITHUB_APP_PRIVATE_KEY)
+    : new StaticTokenProvider(env.GITHUB_TOKEN);
+}
+
+export function createGitHubClient(env: Env): GitHubClient {
+  return new HttpGitHubClient(githubFetch(env), env.GITHUB_API_BASE || "https://api.github.com", createGitHubTokenProvider(env));
 }
