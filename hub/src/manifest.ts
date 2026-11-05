@@ -27,6 +27,8 @@ export interface ManifestBody {
   key_generation: number;
   /** 明示的な巻き戻し指示。これがある時に限り、現行より小さい通番を受け入れる */
   rollback?: { to_seq: number; reason?: string };
+  /** 導入の設定（署名に含めることで、導入先のすり替えを防ぐ）。例：{ "package": "com.example.app" }、{ "bundle": "Example.app" } */
+  install?: Record<string, unknown>;
 }
 
 export interface SignedManifest {

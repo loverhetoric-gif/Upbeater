@@ -104,11 +104,36 @@ export async function handleCheck(req: Request, env: Env, origin: string): Promi
       issued_at: now,
       expires_at: expiresAt,
       ...(rollback ? { rollback } : {}),
+      install: installConfig(app, device.os),
     },
     keys,
     revoked,
   );
   return json({ update: true, manifest, public_keys: publicKeys(keys, revoked) });
+}
+
+/** アプリの install_steps[os].install（導入先などの設定）。無ければ空 */
+function installConfig(app: AppRow, os: string): Record<string, unknown> {
+  try {
+    const all = JSON.parse(app.install_steps) as Record<string, { install?: unknown }>;
+    const v = all[os]?.install;
+    return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** GET /v1/devices/apps：この端末の OS を対象とするアプリの一覧 */
+export async function handleDeviceApps(req: Request, env: Env): Promise<Response> {
+  const device = await authenticateDevice(req, env);
+  const r = await env.DB.prepare(
+    `SELECT a.id AS app_id, a.name, a.kind, a.pinned_seq,
+            (SELECT MAX(seq) FROM releases r WHERE r.app_id = a.id AND r.os = ? AND r.status = 'ready') AS ready_seq
+     FROM apps a WHERE a.owner_id = ? AND a.target_os LIKE '%"' || ? || '"%' ORDER BY a.name`,
+  )
+    .bind(device.os, device.owner_id, device.os)
+    .all();
+  return json({ device_id: device.id, os: device.os, apps: r.results });
 }
 
 const INSTALL_STATUSES = ["downloading", "verifying", "installing", "installed", "failed", "rolled_back", "deferred"] as const;

@@ -114,3 +114,22 @@ describe("照合と結果報告", () => {
     expect((await deviceCall("upb_d_invalid", "/v1/devices/check", { app_id: "app1", current_seq: 0 })).status).toBe(401);
   });
 });
+
+describe("端末が管理するアプリ", () => {
+  it("この端末の OS を対象とするアプリだけを返し、導入の設定は署名付きのマニフェストに入る", async () => {
+    await createApp({ id: "a-android", os: ["android"] });
+    await createApp({ id: "b-linux", os: ["linux"], repo: "x/y" });
+    await env.DB.prepare(`UPDATE apps SET install_steps = '{"android":{"install":{"package":"com.example.app"}}}' WHERE id = 'a-android'`).run();
+    const dev = await registerDevice("owner1", "android");
+    const res = await SELF.fetch(`${ORIGIN}/v1/devices/apps`, { headers: { authorization: `Bearer ${dev.token}` } });
+    const v = (await res.json()) as { apps: { app_id: string }[] };
+    expect(v.apps.map((a) => a.app_id)).toEqual(["a-android"]);
+
+    await pushAndSync("a-android", REPO, "main", sha("A"));
+    await upload("a-android", 1, "android", new Uint8Array([1]));
+    const c = (await (await deviceCall(dev.token, "/v1/devices/check", { app_id: "a-android", current_seq: 0 })).json()) as any;
+    const keys = new Map((c.public_keys as { gen: number; jwk: JsonWebKey }[]).map((k) => [k.gen, k.jwk]));
+    const r = await acceptManifest(c.manifest, keys, new Set(), { app_id: "a-android", os: "android", current_seq: 0, now: Date.now() });
+    expect(r).toMatchObject({ ok: true, body: { install: { package: "com.example.app" } } });
+  });
+});

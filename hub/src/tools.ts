@@ -99,6 +99,17 @@ const stepSchema: Schema = {
     build: { type: "array", items: { type: "string", maxLength: 2000 }, maxItems: 30, description: "順に実行するコマンド（リポジトリの直下で実行）" },
     artifact: { type: "string", maxLength: 400, description: "成果物のパス（リポジトリ内の相対パス。フォルダなら tar.gz にまとめる。既定は「.」＝リポジトリの内容）" },
     timeout_minutes: { type: "integer", minimum: 1, description: "上限の時間（分、既定 60、最大 180）" },
+    install: {
+      type: "object",
+      description: "端末での導入の設定（署名付きで端末に届く）",
+      properties: {
+        package: { type: "string", maxLength: 200, description: "Android のパッケージ名（成果物と一致しなければ導入しない）" },
+        bundle: { type: "string", maxLength: 200, description: "macOS の .app の名前（例：Example.app。/Applications に置く）" },
+        bundle_id: { type: "string", maxLength: 200, description: "macOS のバンドル ID（成果物と一致しなければ導入しない）" },
+        when_running: { type: "string", enum: ["wait", "next_launch", "restart"], description: "対象アプリが使用中のとき：終了を待つ／次回起動時に適用／即時に再起動" },
+        health_seconds: { type: "integer", minimum: 0, description: "入れ替え後に起動を確かめる時間（秒、既定 15。0 なら確かめない）" },
+      },
+    },
   },
 };
 const stepsSchema: Schema = {

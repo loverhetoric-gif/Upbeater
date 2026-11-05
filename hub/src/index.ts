@@ -18,7 +18,7 @@ import {
 import { handleCreateApp, handleCreateRegistrationCode, handlePutArtifact, requireAdmin } from "./routes/admin";
 import { handleArtifact } from "./routes/artifacts";
 import { handleArtifactUpload, handleClaim, handleFail, handleHeartbeat, reclaimExpired } from "./routes/builder";
-import { handleCheck, handleRegister, handleReport } from "./routes/devices";
+import { handleCheck, handleDeviceApps, handleRegister, handleReport } from "./routes/devices";
 import { handleGitHubWebhook } from "./routes/webhook";
 
 export { AppCoordinator };
@@ -52,6 +52,7 @@ async function route(req: Request, env: Env): Promise<Response> {
   if (p === "/v1/devices/register" && m === "POST") return handleRegister(req, env);
   if (p === "/v1/devices/check" && m === "POST") return handleCheck(req, env, url.origin);
   if (p === "/v1/devices/report" && m === "POST") return handleReport(req, env);
+  if (p === "/v1/devices/apps" && m === "GET") return handleDeviceApps(req, env);
 
   if (p === "/v1/builder/claim" && m === "POST") return handleClaim(req, env);
   const bj = /^\/v1\/builder\/jobs\/([0-9a-f-]{36})\/(heartbeat|artifact|fail)$/.exec(p);
