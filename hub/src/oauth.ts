@@ -399,6 +399,15 @@ export async function handleRevoke(req: Request, env: Env): Promise<Response> {
 /** MCP の Bearer トークンを確かめ、利用者を返す */
 export async function authenticateMcp(req: Request, env: Env): Promise<string> {
   const h = req.headers.get("authorization") ?? "";
+  // 直接登録した接続用トークン（Claude Code など）
+  const direct = /^Bearer\s+(upb_m_[A-Za-z0-9_-]+)$/.exec(h);
+  if (direct) {
+    const hash = await sha256Hex(direct[1]!);
+    const row = await env.DB.prepare("SELECT owner_id FROM mcp_tokens WHERE token_hash = ? AND revoked_at IS NULL").bind(hash).first<{ owner_id: string }>();
+    if (!row) throw new HttpError(401, "invalid_token");
+    await env.DB.prepare("UPDATE mcp_tokens SET last_used_at = ? WHERE token_hash = ?").bind(Date.now(), hash).run();
+    return row.owner_id;
+  }
   const m = /^Bearer\s+(upb_at_[A-Za-z0-9_-]+)$/.exec(h);
   if (!m) throw new HttpError(401, "unauthorized");
   const row = await env.DB.prepare(

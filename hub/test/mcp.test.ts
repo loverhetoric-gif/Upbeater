@@ -94,3 +94,17 @@ describe("MCP サーバー", () => {
     expect(await tool(me.access, "request_secrets", { names: ["bad-name"] })).toMatchObject({ ok: false, code: "invalid_input" });
   });
 });
+
+describe("直接登録する接続用トークン", () => {
+  it("管理 API で発行したトークンで MCP を使え、発行し直すと前のものは使えない", async () => {
+    const issue = async () =>
+      ((await (await SELF.fetch(`${ORIGIN}/v1/admin/mcp-tokens`, { method: "POST", headers: { authorization: "Bearer test-admin-token", "content-type": "application/json" }, body: JSON.stringify({ owner_id: "gh:1001" }) })).json()) as any).token as string;
+    const t1 = await issue();
+    expect(t1).toMatch(/^upb_m_/);
+    expect((await rpc(t1, "tools/list")).body.result.tools.length).toBeGreaterThan(10);
+    expect(JSON.stringify((await env.DB.prepare("SELECT * FROM mcp_tokens").all()).results)).not.toContain(t1);
+    const t2 = await issue();
+    expect((await rpc(t1, "ping")).status).toBe(401);
+    expect((await rpc(t2, "ping")).status).toBe(200);
+  });
+});

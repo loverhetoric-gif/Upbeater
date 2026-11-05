@@ -8,9 +8,10 @@
  * - POST /v1/admin/runs/:id/cancel|rerun      取り消し・失敗したジョブの再実行
  * - GET  /v1/admin/jobs/:id/logs              ログ（通番の順。秘密情報は伏せる）
  * - POST /v1/admin/secret-forms               秘密情報の入力ページ（一回限り・期限なし）を発行する
+ * - POST /v1/admin/mcp-tokens                 MCP の接続用トークンを発行する（同じ名前の前のトークンは取り消す）
  */
 import { coordinatorCall, type EventOutcome } from "../coordinator";
-import { randomCode, sha256Hex, timingSafeEqual } from "../crypto";
+import { randomCode, randomToken, sha256Hex, timingSafeEqual } from "../crypto";
 import type { Env, JobRow, RepoRow, RunRow } from "../env";
 import { bearer, HttpError, int, json, readJson, str } from "../http";
 import { putSecret } from "../secrets";
@@ -63,6 +64,18 @@ export async function handleAdmin(req: Request, env: Env, p: string): Promise<Re
     const owner = str(b.owner_id, "owner_id", { pattern: ID });
     const repo = b.repo ? (await repoOf(env, owner, str(b.repo, "repo", { pattern: REPO }))).id : "";
     return createSecretForm(env, new URL(req.url).origin, owner, repo, b.names);
+  }
+  if (p === "/v1/admin/mcp-tokens" && m === "POST") {
+    const b = await readJson(req);
+    const owner = str(b.owner_id, "owner_id", { pattern: ID });
+    const name = str(b.name ?? "claude-code", "name", { max: 100 });
+    const token = randomToken("upb_m_");
+    const now = Date.now();
+    await env.DB.batch([
+      env.DB.prepare("UPDATE mcp_tokens SET revoked_at = ? WHERE owner_id = ? AND name = ? AND revoked_at IS NULL").bind(now, owner, name),
+      env.DB.prepare("INSERT INTO mcp_tokens (token_hash, owner_id, name, created_at) VALUES (?, ?, ?, ?)").bind(await sha256Hex(token), owner, name, now),
+    ]);
+    return json({ token, name }, 201);
   }
   if (p === "/v1/admin/secrets" && m === "GET") {
     const owner = str(new URL(req.url).searchParams.get("owner_id"), "owner_id", { pattern: ID });
