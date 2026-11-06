@@ -1,6 +1,9 @@
 package job
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 const devicesJSON = `ignored {"result":{"devices":[
  {"identifier":"A","connectionProperties":{"pairingState":"paired","transportType":"localNetwork"},"deviceProperties":{"name":"iPhone"},"hardwareProperties":{"udid":"U1","platform":"iOS","reality":"physical"}},
@@ -21,5 +24,18 @@ func TestPickIOSDevices(t *testing.T) {
 	got, missing := pickDevices(all, []string{"u2", "他人", "無い"})
 	if len(got) != 1 || got[0].ID != "B" || len(missing) != 2 {
 		t.Fatalf("名前・UDID で選び、ペアリングしていないものは選ばない：%v %v", got, missing)
+	}
+}
+
+func TestInstallFailReason(t *testing.T) {
+	free := "ERROR: (MIInstallerErrorDomain error 13) LegacyErrorString = ApplicationVerificationFailed\nFunctionName = -[MIFreeProfileValidatedAppTracker _onQueue_addReferenceForApplicationIdentifier:bundle:error:]"
+	if r := installFailReason(free); !strings.Contains(r, "3 つまで") {
+		t.Fatalf("無料の上限を説明していません：%s", r)
+	}
+	if r := installFailReason("LegacyErrorString = ApplicationVerificationFailed"); !strings.Contains(r, "署名を受け入れません") {
+		t.Fatalf("署名の失敗を説明していません：%s", r)
+	}
+	if r := installFailReason("a\nb"); r != "a / b" {
+		t.Fatalf("知らない失敗はそのまま返す：%s", r)
 	}
 }

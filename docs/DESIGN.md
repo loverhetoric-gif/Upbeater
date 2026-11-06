@@ -82,7 +82,7 @@ jobs:
 - **Android**：PackageInstaller。Android 12 以降、Upbeater が導入元なら確認なしで更新できる
 - **macOS**：`.app` を差し替えて再起動
 - **Linux**：AppImage を差し替えて再起動
-- **iOS**：組み込み部品 `install-ios`（macOS の Runner）で、Mac とペアリング済みの iPhone・iPad に同じ Wi-Fi 越しで `.app` を入れる（`xcrun devicectl`）。有料の Apple Developer 登録は使わず、Xcode に入れた Apple ID（無料）で署名する。Runner は証明書のチーム ID を `$UPBEATER_APPLE_TEAM` で渡す（例 `xcodebuild … -allowProvisioningUpdates DEVELOPMENT_TEAM=$UPBEATER_APPLE_TEAM`）。無料の署名は 7 日で切れるため、定期実行（例 `schedule: ['0 3 */3 * *']`）で組み立て直して入れ直す。`with`：`app`（.app のパス・必須）、`device`（名前か UDID。改行で複数。省くとペアリング済みで届くすべて）。届かない時は手順を失敗にし、次の実行で入れる
+- **iOS**：組み込み部品 `install-ios`（macOS の Runner）で、Mac とペアリング済みの iPhone・iPad に同じ Wi-Fi 越しで `.app` を入れる（`xcrun devicectl`）。有料の Apple Developer 登録は使わず、Xcode に入れた Apple ID（無料）で署名する。Runner は証明書のチーム ID を `$UPBEATER_APPLE_TEAM` で渡す（例 `xcodebuild … -allowProvisioningUpdates DEVELOPMENT_TEAM=$UPBEATER_APPLE_TEAM`）。無料の署名は 7 日で切れるため、定期実行（例 `schedule: ['0 3 */3 * *']`）で組み立て直して入れ直す。`with`：`app`（.app のパス・必須）、`device`（名前か UDID。改行で複数。省くとペアリング済みで届くすべて）。届かない時は手順を失敗にし、次の実行で入れる。無料の署名で入れられるアプリは 1 台に 3 つまで（Apple の制限）。上限に達して断られた時は、その理由を日本語でログに出す
 
 ### 配布の実装（開発順序6）
 
