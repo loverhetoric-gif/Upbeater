@@ -35,6 +35,9 @@ func TestInstallFailReason(t *testing.T) {
 	if r := installFailReason("LegacyErrorString = ApplicationVerificationFailed"); !strings.Contains(r, "署名を受け入れません") {
 		t.Fatalf("署名の失敗を説明していません：%s", r)
 	}
+	if r := installFailReason("Failed to install embedded profile : 0xe8008012 (This provisioning profile cannot be installed on this device.)"); !strings.Contains(r, "署名の対象に入っていません") {
+		t.Fatalf("端末が署名の対象外であることを説明していません：%s", r)
+	}
 	if r := installFailReason("a\nb"); r != "a / b" {
 		t.Fatalf("知らない失敗はそのまま返す：%s", r)
 	}

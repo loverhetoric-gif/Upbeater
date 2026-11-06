@@ -140,7 +140,7 @@ func (r *runner) installIOS(ctx context.Context, with map[string]string) (int, e
 		r.line(fmt.Sprintf("✓ %s に入れました", d.Name))
 	}
 	if failed > 0 {
-		return -1, fmt.Errorf("%d 台中 %d 台に入れられませんでした（iPhone が同じ Wi-Fi にいて、画面のロックが外れているか確かめてください）", len(targets), failed)
+		return -1, fmt.Errorf("%d 台中 %d 台に入れられませんでした（理由は上の ✕ の行）", len(targets), failed)
 	}
 	return 0, nil
 }
@@ -150,6 +150,8 @@ func installFailReason(out string) string {
 	switch {
 	case strings.Contains(out, "MIFreeProfileValidatedAppTracker"):
 		return "無料の Apple ID の署名で入れられるアプリは、1 台に 3 つまでです。すでに上限に達しています。使わないアプリを iPhone から消すと入れられます（" + strings.TrimSpace(lastLines(out, 2)) + "）"
+	case strings.Contains(out, "0xe8008012") || strings.Contains(out, "cannot be installed on this device"):
+		return "この端末は、アプリの署名の対象に入っていません。xcodebuild に -allowProvisioningDeviceRegistration と、この端末を -destination id=<UDID> で渡して一度組み立てると対象に加わります。入れる端末を絞るなら with の device で指定してください（" + strings.TrimSpace(lastLines(out, 2)) + "）"
 	case strings.Contains(out, "ApplicationVerificationFailed"):
 		return "iPhone が署名を受け入れませんでした。署名の期限切れか、この iPhone がプロファイルに入っていない可能性があります（" + strings.TrimSpace(lastLines(out, 2)) + "）"
 	}
