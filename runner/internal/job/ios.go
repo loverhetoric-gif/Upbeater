@@ -134,7 +134,7 @@ func (r *runner) installIOS(ctx context.Context, with map[string]string) (int, e
 		cancel()
 		if err != nil {
 			failed++
-			r.line(fmt.Sprintf("✕ %s に入れられません：%s", d.Name, strings.TrimSpace(lastLines(string(out), 5))))
+			r.line(fmt.Sprintf("✕ %s に入れられません：%s", d.Name, installFailReason(string(out))))
 			continue
 		}
 		r.line(fmt.Sprintf("✓ %s に入れました", d.Name))
@@ -143,6 +143,17 @@ func (r *runner) installIOS(ctx context.Context, with map[string]string) (int, e
 		return -1, fmt.Errorf("%d 台中 %d 台に入れられませんでした（iPhone が同じ Wi-Fi にいて、画面のロックが外れているか確かめてください）", len(targets), failed)
 	}
 	return 0, nil
+}
+
+// installFailReason は devicectl の導入の失敗を、分かる理由に直す。分からなければ出力の終わりを返す。
+func installFailReason(out string) string {
+	switch {
+	case strings.Contains(out, "MIFreeProfileValidatedAppTracker"):
+		return "無料の Apple ID の署名で入れられるアプリは、1 台に 3 つまでです。すでに上限に達しています。使わないアプリを iPhone から消すと入れられます（" + strings.TrimSpace(lastLines(out, 2)) + "）"
+	case strings.Contains(out, "ApplicationVerificationFailed"):
+		return "iPhone が署名を受け入れませんでした。署名の期限切れか、この iPhone がプロファイルに入っていない可能性があります（" + strings.TrimSpace(lastLines(out, 2)) + "）"
+	}
+	return strings.TrimSpace(lastLines(out, 5))
 }
 
 func transportName(t string) string {
