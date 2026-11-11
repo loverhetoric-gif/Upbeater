@@ -70,9 +70,9 @@ jobs:
 
 ## 秘密情報
 
-- Hub に暗号化して保存する。値は LININGS. 経由で投入し、チャットに出さない
+- Hub に暗号化して保存する。値は UnderTalk 経由で投入し、チャットに出さない
 - ジョブの実行時だけ Runner へ渡し、ログからは自動で伏せる
-- 既存の Actions Secrets と同じ名前で使えるようにする（GitHub から値は取り出せないため、LININGS. 経由で再登録する）
+- 既存の Actions Secrets と同じ名前で使えるようにする（GitHub から値は取り出せないため、UnderTalk 経由で再登録する）
 - **入力ページ**（MCP・管理画面ができるまでの入口）：管理用トークンで、リポジトリと名前を決めた一回限りのページ（`/secret-form/<鍵>`）を発行する。スマホでも開け、伏せ字の欄に値を入れて送ると、決めた名前の分だけ暗号化して保存する。鍵は 256 ビットの乱数で、Hub にはハッシュだけを置く。期限は設けない。一度送ったら使えず、同じリポジトリに新しいページを発行すると、まだ使っていない前のページは使えなくなる。使い終わった記録は 1 日で消す。ページには値も、登録済みの値の一部も出さない（登録済みかどうかだけ）。JavaScript を使わず、`Content-Security-Policy`・`Cache-Control: no-store`・`Referrer-Policy: no-referrer` を付ける。発行：`node hub/scripts/admin.mjs secret-form --repo <owner/name> <名前>…`
 
 ## 端末への配布（組み込み機能 `distribute`）

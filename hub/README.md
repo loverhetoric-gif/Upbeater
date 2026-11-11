@@ -49,7 +49,7 @@ Runner のジョブごとの報告には、受け取った時の `job_token` を
 
 ## Secret（名前と置き場所のみ。値はここに書かない）
 
-すべて Worker の Secret（`wrangler secret put <名前>`）に置き、値は LININGS. 経由で投入する。
+すべて Worker の Secret（`wrangler secret put <名前>`）に置き、値は UnderTalk 経由で投入する。
 
 | 名前 | 用途 |
 | --- | --- |
