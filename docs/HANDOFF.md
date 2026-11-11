@@ -70,7 +70,7 @@ Upbeater は GitHub Actions の代替（`docs/DESIGN.md`）。開発順序は DE
 | 項目 | 状態 |
 | --- | --- |
 | GitHub App の作成 | 済み：`upbeater-loverhetoric`（App ID 5623766、`hub/wrangler.jsonc` に記載）。権限：Checks・Contents・Pull requests・Commit statuses は読み書き、Metadata は読み取り。入れられる先はこのアカウントのみ |
-| 秘密鍵 | 発行済み（利用者の PC に .pem で保管）。Hub の公開時に LININGS. 経由で Secret `GITHUB_APP_PRIVATE_KEY` に入れる |
+| 秘密鍵 | 発行済み（利用者の PC に .pem で保管）。Hub の公開時に UnderTalk 経由で Secret `GITHUB_APP_PRIVATE_KEY` に入れる |
 | Webhook | 済み：送り先とシークレットを設定。合図（push・pull_request・delete）の選択は利用者が GitHub の画面で行う |
 | App のインストール・リポジトリの登録 | 未：GitHub の画面でインストールし、`node scripts/admin.mjs repo <owner/name>` で Hub に登録する |
 | Runner | 未：利用者の Mac で組み立てて登録する（`runner/README.md`） |
