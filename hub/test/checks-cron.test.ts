@@ -106,6 +106,14 @@ describe("定期実行と取りこぼし", () => {
     expect(await reconcile(env, { now: Date.now() + 11 * 60_000 })).toBe(0); // 冪等
   });
 
+  it("定期の処理（runCron）は、既定では GitHub を読む照合をしない", async () => {
+    await registerRepo();
+    await commit("missed", { ".upbeater/ci.yml": ONE });
+    const { runCron } = await import("../src/scheduled");
+    await runCron(env);
+    expect((await runs()).filter((r) => r.actor === "reconcile")).toHaveLength(0);
+  });
+
   it("GitHub の障害で定義ファイルを取れない時は、合図を待ち行列に残して再試行する", async () => {
     const repoId = await registerRepo();
     const s = await commit("a", { ".upbeater/ci.yml": ONE });

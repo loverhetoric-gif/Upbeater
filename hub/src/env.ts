@@ -25,6 +25,8 @@ export interface Env {
   CLOUD_RUNNER_LABELS?: string;
   /** Hub 自身の URL（クラウド Runner に渡す） */
   HUB_URL?: string;
+  /** "1" のときだけ、定期の処理で GitHub の既定ブランチを読み、取りこぼした push を照合する（既定は動かさない） */
+  RECONCILE_GITHUB?: string;
   /** テスト用：Google の API への接続口と URL */
   GCP_API?: Fetcher;
   GCP_TOKEN_URL?: string;

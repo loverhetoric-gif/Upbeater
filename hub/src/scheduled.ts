@@ -1,5 +1,5 @@
 /**
- * Cron（毎分）：定期実行・心拍の途絶と時間超過の検知・結果表示の再試行・Webhook の取りこぼしの照合・Runner 不在の通知
+ * Cron（5 分ごと）：定期実行・心拍の途絶と時間超過の検知・結果表示の再試行・Runner 不在の通知（Webhook の取りこぼしの照合は RECONCILE_GITHUB="1" のときだけ）
  */
 import { dispatchCloudRunners } from "./cloud";
 import { flushChecks } from "./checks";
@@ -159,7 +159,9 @@ export async function runCron(env: Env, now = Date.now()): Promise<void> {
     ["schedules", () => runSchedules(env, now)],
     ["sweep", () => sweepJobs(env, now)],
     ["notice", () => noticeWaitingJobs(env, now)],
-    ["reconcile", () => reconcile(env, { now })],
+    // 取りこぼしの照合は GitHub を 10 分ごとに読むので、既定では動かさない（RECONCILE_GITHUB="1" のときだけ）。
+    // 2026-11 に GitHub への定期アクセスでアカウントが止められたため。取りこぼしは手動の実行（run_workflow）で補う
+    ["reconcile", () => (env.RECONCILE_GITHUB === "1" ? reconcile(env, { now }) : Promise.resolve(0))],
     ["cloud", () => (env.HUB_URL ? dispatchCloudRunners(env, env.HUB_URL, now) : Promise.resolve(0))],
     ["checks", () => flushChecks(env, { now })],
     [

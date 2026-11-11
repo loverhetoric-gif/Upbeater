@@ -21,9 +21,10 @@
   "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "upbeater-blobs" }],
   "durable_objects": { "bindings": [{ "name": "REPO_COORDINATOR", "class_name": "RepoCoordinator" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RepoCoordinator"] }],
-  // 毎分：定期実行・心拍の途絶と時間超過・結果表示の再試行・取りこぼしの照合
-  // GitHub 停止中（2026-11-09〜）は定期実行なし（GitHub への 1 分ごとのアクセスを止める）。元は ["* * * * *"]
-  "triggers": { "crons": [] },
+  // 5 分ごと：定義ファイルの schedule・心拍の途絶と時間超過・結果表示の再試行・Runner 不在の通知・片付け（月 約 8,640 回）
+  // GitHub を定期的に読む「取りこぼしの照合」は動かさない（RECONCILE_GITHUB が "1" のときだけ）。
+  // 2026-11-07〜10 に GitHub への 1 分ごとのアクセスなどでアカウントが止められたため、毎分（元 ["* * * * *"]）には戻さない
+  "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {
     "GITHUB_API_BASE": "https://api.github.com",
     "GITHUB_WEB_BASE": "https://github.com",
