@@ -22,7 +22,8 @@
   "durable_objects": { "bindings": [{ "name": "REPO_COORDINATOR", "class_name": "RepoCoordinator" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RepoCoordinator"] }],
   // 毎分：定期実行・心拍の途絶と時間超過・結果表示の再試行・取りこぼしの照合
-  "triggers": { "crons": ["* * * * *"] },
+  // GitHub 停止中（2026-11-09〜）は定期実行なし（GitHub への 1 分ごとのアクセスを止める）。元は ["* * * * *"]
+  "triggers": { "crons": [] },
   "vars": {
     "GITHUB_API_BASE": "https://api.github.com",
     "GITHUB_WEB_BASE": "https://github.com",
