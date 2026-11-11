@@ -1,0 +1,58 @@
+# 指定したリポジトリを GitHub から GitLab（loverhetoric1）へ写す（git push --mirror 相当）。
+# GitHub への負荷を抑えるため、1 日 1 回（日本時間 4:23）だけ動かす。手動でも実行できる。
+# GitHub からは Mac の手元の写し（~/.upbeater/mirror）へ差分だけを取り込み、ブランチとタグを GitLab へ送る。
+# PR の参照（refs/pull/*）は送らない。GitHub で消したブランチ・タグは GitLab からも消す。
+# GitLab のプロジェクトが無ければ、push の時に非公開で作られる（GitLab の push で作る機能）。
+name: GitLab への写し
+
+on:
+  schedule: ["23 19 * * *"]
+  manual: {}
+
+jobs:
+  mirror:
+    runs-on: macos
+    timeout: 30
+    secrets: [GITLAB_TOKEN]
+    concurrency: { group: gitlab-mirror, cancel-in-progress: false }
+    env:
+      GITHUB_OWNER: loverhetoric-gif
+      GITLAB_NAMESPACE: loverhetoric1
+      # 写すリポジトリ（GitHub の名前。1 行に 1 つ）
+      REPOS: |
+        Love-Factory
+        Upbeater
+        LIFElive
+        HiddenGateExchanger
+        NSC
+    steps:
+      - name: GitHub から取り込み、GitLab へ送る
+        run: |
+          [ -n "${GITLAB_TOKEN:-}" ] || { echo "秘密情報 GITLAB_TOKEN が登録されていません"; exit 1; }
+          export GIT_TERMINAL_PROMPT=0
+          BASE="$HOME/.upbeater/mirror"
+          mkdir -p "$BASE"
+          # トークンは引数や URL に書かず、資格情報の補助から環境変数で渡す
+          GL_AUTH='!f() { echo username=oauth2; echo "password=$GITLAB_TOKEN"; }; f'
+          failed=""
+          for name in $REPOS; do
+            echo "== $name"
+            dir="$BASE/$name.git"
+            if [ ! -d "$dir" ]; then
+              git init --bare --quiet "$dir"
+            fi
+            # ブランチとタグだけを取り込む（消えたものは手元からも消す）
+            if ! git -C "$dir" fetch --prune --quiet "https://github.com/$GITHUB_OWNER/$name.git" \
+                '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'; then
+              echo "GitHub からの取り込みに失敗しました：$name"; failed="$failed $name"; continue
+            fi
+            if ! git -C "$dir" -c credential.helper= -c credential.helper="$GL_AUTH" \
+                push --prune --quiet "https://gitlab.com/$GITLAB_NAMESPACE/$name.git" \
+                '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'; then
+              echo "GitLab への送信に失敗しました：$name"; failed="$failed $name"; continue
+            fi
+            echo "写しました（ブランチ $(git -C "$dir" for-each-ref refs/heads | wc -l | tr -d ' ')・タグ $(git -C "$dir" for-each-ref refs/tags | wc -l | tr -d ' ')）"
+            # 次の取り込みとの間は少しあける
+            sleep 5
+          done
+          if [ -n "$failed" ]; then echo "失敗したリポジトリ：$failed"; exit 1; fi
