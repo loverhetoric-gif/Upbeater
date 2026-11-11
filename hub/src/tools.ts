@@ -656,7 +656,7 @@ export const TOOLS: Tool[] = [
     name: "merge_pr",
     title: "PR のマージ",
     description:
-      "マージ前に衝突を確認し、衝突していれば main を取り込んで再試行する。解消できなければ PR を残し、衝突しうるファイルを返す。ブランチ保護・必須の検査で止まる場合は満たせない条件を返す",
+      "マージ前に衝突を確認し、衝突していれば main を取り込んで再試行する。解消できなければ PR を残し、衝突しうるファイルを返す。ブランチ保護・必須の検査で止まる場合は満たせない条件を返す。短い時間に何度も呼ばない：変更は手元でテストを通してからまとめて 1 回にする（PR を作って数秒でマージ、を繰り返すと GitHub に自動の連続操作と見なされる）。",
     inputSchema: { type: "object", properties: { repo: repoArg, number: int("PR の番号", 1), method: mergeMethod, request_id: requestId }, required: ["repo", "number"] },
     annotations: { destructiveHint: true },
     async run(ctx, a) {
@@ -667,7 +667,7 @@ export const TOOLS: Tool[] = [
     name: "ship_change",
     title: "変更を一続きで反映",
     description:
-      "ブランチ作成 → コミット → PR → マージを一続きで行う。失敗した場合は段階・理由・再試行の可否を返し、同じ request_id で呼び直すと失敗した段階から続ける。マージ後は .upbeater の定義に従って自動処理が始まる",
+      "ブランチ作成 → コミット → PR → マージを一続きで行う。失敗した場合は段階・理由・再試行の可否を返し、同じ request_id で呼び直すと失敗した段階から続ける。マージ後は .upbeater の定義に従って自動処理が始まる。短い時間に何度も呼ばない：変更は手元でテストを通してからまとめて 1 回にする（PR を作って数秒でマージ、を繰り返すと GitHub に自動の連続操作と見なされる）。",
     inputSchema: {
       type: "object",
       properties: {

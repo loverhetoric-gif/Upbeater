@@ -29,7 +29,7 @@ export interface Env {
   GCP_API?: Fetcher;
   GCP_TOKEN_URL?: string;
   GCP_RUN_BASE?: string;
-  /** マージの可否の判定を待つ間隔（ミリ秒。テストで短くする） */
+  /** マージの可否の判定を待つ間隔（ミリ秒。既定 5000。テストで短くする） */
   GITHUB_POLL_MS?: string;
 
   // Secret

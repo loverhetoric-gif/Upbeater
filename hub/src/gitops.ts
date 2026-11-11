@@ -293,7 +293,8 @@ async function stageMerge(ctx: OpContext, r: Stages, repo: RepoRef, n: number, m
   r.stage = "merge_pr";
   if (typeof r.state.merged_sha === "string") return r.state.merged_sha;
   const sleep = ctx.sleep ?? ((ms: number) => new Promise((res) => setTimeout(res, ms)));
-  const poll = Number(ctx.env.GITHUB_POLL_MS ?? "1500") || 1500;
+  // GitHub に短い間隔で問い合わせ続けない（2026-11 に自動の連続アクセスでアカウントが止められた）。5 秒・10 秒…と間をあける
+  const poll = Number(ctx.env.GITHUB_POLL_MS ?? "5000") || 5000;
   // マージの push を合図にできるように、先に PR を記録する
   await markRequested(ctx, repo, "pull", String(n));
   let updatedOnce = false;

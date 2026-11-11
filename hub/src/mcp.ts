@@ -12,7 +12,7 @@ const SERVER_INFO = { name: "upbeater", title: "Upbeater", version: "0.4.0" };
 const INSTRUCTIONS =
   "Upbeater は GitHub Actions の代わりに、各リポジトリの .upbeater/*.yml の自動処理（検査・ビルド・公開）を自前の Runner で実行する。" +
   "実行の状況は list_runs・get_run・get_logs で確かめ、失敗したら rerun で再実行する。Actions の定義は migrate_workflows で変換して PR にできる。" +
-  "GitHub の変更は ship_change で一続きに反映でき、失敗したら同じ request_id で呼び直すと失敗した段階から続く。" +
+  "GitHub の変更は ship_change で一続きに反映でき、失敗したら同じ request_id で呼び直すと失敗した段階から続く。ただし短い時間に何度も PR の作成・マージをしない（手元でテストを通し、変更をまとめて 1 回で反映する）。" +
   "秘密情報の値はチャットに書かせず、request_secrets の入力ページで利用者に入れてもらう。人の判断が要る失敗は list_operations の needs_human_only で確かめられる。";
 
 interface RpcRequest {
