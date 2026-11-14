@@ -104,6 +104,8 @@ func (r *runner) collect(id string, f stepFiles) error {
 		}
 		for k, v := range kv {
 			if k == "PATH" || strings.HasPrefix(k, "UPBEATER_") || k == "GITHUB_OUTPUT" || k == "GITHUB_ENV" || k == "GITHUB_PATH" || k == "GITHUB_STEP_SUMMARY" {
+				// 黙って捨てると、後の手順で「値が無い」理由が分からないため、ログで知らせる
+				r.line("注意：GITHUB_ENV の " + k + " は Upbeater が使う名前のため、後の手順に渡しません（別の名前にしてください）")
 				continue
 			}
 			r.env[k] = v
