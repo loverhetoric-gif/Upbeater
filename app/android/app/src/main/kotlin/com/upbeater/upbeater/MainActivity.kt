@@ -102,6 +102,7 @@ class MainActivity : FlutterActivity() {
                 }
                 "archiveInfo" -> background(result) { archiveInfo(call.argument<String>("path")!!) }
                 "installedInfo" -> background(result) { installedInfo(call.argument<String>("package")!!) }
+                "installedSha256" -> background(result) { installedSha256(call.argument<String>("package")!!) }
                 "install" -> {
                     val path = call.argument<String>("path")!!
                     io.execute {
@@ -172,6 +173,23 @@ class MainActivity : FlutterActivity() {
             packageManager.getPackageInfo(pkg, signingFlag())
         }
         describe(info)
+    } catch (e: PackageManager.NameNotFoundException) {
+        null
+    }
+
+    /** 導入済みの APK（分割していない本体）の SHA-256。入っていなければ null */
+    private fun installedSha256(pkg: String): String? = try {
+        val dir = packageManager.getApplicationInfo(pkg, 0).sourceDir
+        val md = MessageDigest.getInstance("SHA-256")
+        File(dir).inputStream().use { input ->
+            val buf = ByteArray(1 shl 16)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                md.update(buf, 0, n)
+            }
+        }
+        md.digest().joinToString("") { "%02x".format(it) }
     } catch (e: PackageManager.NameNotFoundException) {
         null
     }

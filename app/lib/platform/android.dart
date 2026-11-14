@@ -56,6 +56,10 @@ class AndroidInstaller implements Installer {
       final a = Set<String>.from(apk['signers'] as List);
       final b = Set<String>.from(installed['signers'] as List);
       if (a.intersection(b).isEmpty) return const InstallResult.failed('署名鍵が導入済みの版と異なるため、導入しません');
+      // この成果物そのものがすでに入っている：導入済みとして扱う
+      // （Upbeater 自身の更新でアプリが入れ替え中に終了した後や、最初の 1 回を Mac から入れた後）
+      final current = await _ch.invokeMethod<String>('installedSha256', {'package': pkg});
+      if (current != null && current.toLowerCase() == body.sha256.toLowerCase()) return const InstallResult.ok('すでに導入済みです');
       if ((installed['versionCode'] as num) >= (apk['versionCode'] as num)) {
         return InstallResult.failed('versionCode が上がっていません（導入済み ${installed['versionCode']}、新しい版 ${apk['versionCode']}）');
       }
