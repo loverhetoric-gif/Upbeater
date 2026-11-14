@@ -1,0 +1,21 @@
+# 端末への配布の署名鍵（Hub の Secret MANIFEST_SIGNING_KEYS）を、自宅の Mac で用意する。手動実行の時だけ動かす。
+# - 無ければ作って入れる。あれば何も変えない（hub/scripts/signing-key.mjs）
+# - 秘密の部分は Mac の ~/.upbeater/hub-secrets.json にだけ置く。ログには公開鍵（公開してよい値）だけを出す
+# - Cloudflare へは、この Mac の wrangler のログインを使う（hub/scripts/deploy.mjs と同じ）
+name: hub-signing-key
+on:
+  manual: {}
+jobs:
+  key:
+    name: 配布の署名鍵を用意する
+    runs-on: macos
+    timeout: 15
+    steps:
+      - uses: checkout
+      - name: 用意する
+        working-directory: hub
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund > /dev/null
+          node scripts/signing-key.mjs
+          curl -fsS --max-time 20 https://upbeater-hub.twilight-star-9d9d.workers.dev/v1/keys && echo
