@@ -1,7 +1,7 @@
 # Upbeater アプリ（Android 版）を組み立てて署名し、登録した Android 端末へ配る。手動実行の時だけ動かす。
 # - 自宅の Mac の実行役（macos）で動く。署名の鍵は .upbeater/android-keygen.yml で作ったもの
 # - 版番号（versionCode）は Upbeater の実行番号（リポジトリの中で必ず増える）
-# - 端末に埋め込む公開鍵は、組み立てのたびに Hub の GET /v1/keys から取る
+# - 端末に埋め込む公開鍵は、組み立てのたびに Hub の GET /v1/keys から取る（UPBEATER_ で始まる名前は GITHUB_ENV で渡せないため HUB_ の名前で渡す）
 # - 組み立てた APK は Mac の ~/.upbeater/android/Upbeater.apk にも置く（最初の 1 回の導入 android-install.yml で使う）
 name: app-android
 on:
@@ -37,8 +37,8 @@ jobs:
           PUB="$(printf '%s' "$KEYS" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps({str(k["gen"]): k["jwk"]["x"] for k in d["keys"] if k["status"] != "revoked"}, separators=(",",":")))')"
           REV="$(printf '%s' "$KEYS" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(",".join(str(k["gen"]) for k in d["keys"] if k["status"] == "revoked"))')"
           [ "$PUB" != "{}" ] || { echo "使える公開鍵がありません"; exit 1; }
-          echo "UPBEATER_PUBLIC_KEYS=$PUB" >> "$GITHUB_ENV"
-          echo "UPBEATER_REVOKED=$REV" >> "$GITHUB_ENV"
+          echo "HUB_PUBLIC_KEYS=$PUB" >> "$GITHUB_ENV"
+          echo "HUB_REVOKED_GENERATIONS=$REV" >> "$GITHUB_ENV"
           echo "埋め込む公開鍵の世代：$(printf '%s' "$PUB" | python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)))')"
 
       - name: 組み立てる
@@ -46,8 +46,8 @@ jobs:
         run: |
           set -euo pipefail
           flutter build apk --release --build-number="$GITHUB_RUN_NUMBER" \
-            --dart-define=UPBEATER_PUBLIC_KEYS="$UPBEATER_PUBLIC_KEYS" \
-            --dart-define=UPBEATER_REVOKED_GENERATIONS="$UPBEATER_REVOKED"
+            --dart-define=UPBEATER_PUBLIC_KEYS="$HUB_PUBLIC_KEYS" \
+            --dart-define=UPBEATER_REVOKED_GENERATIONS="$HUB_REVOKED_GENERATIONS"
 
       - name: 署名する
         run: |
