@@ -14,6 +14,7 @@ func TestActionsCompat(t *testing.T) {
 		hub.Step{Kind: "run", ID: "check", Run: `echo "ok=true" >> "$GITHUB_OUTPUT"
 { echo "note<<EOF"; echo "1行目"; echo "2行目"; echo "EOF"; } >> "$GITHUB_OUTPUT"
 echo "GREETING=こんにちは" >> "$GITHUB_ENV"
+echo "UPBEATER_KEYS=x" >> "$GITHUB_ENV"
 echo "### まとめの見出し" >> "$GITHUB_STEP_SUMMARY"`},
 		hub.Step{Kind: "run", If: "steps.check.outputs.ok == 'true'", Run: `echo "出力=${{ steps.check.outputs.ok }} 環境=$GREETING 合図=$GITHUB_EVENT_NAME sha=$GITHUB_SHA ref=$GITHUB_REF_NAME repo=$GITHUB_REPOSITORY CI=$CI 番号=$GITHUB_RUN_NUMBER 鍵=$FROM_SECRET"`},
 		hub.Step{Kind: "run", If: "steps.check.outputs.ok == 'false'", Run: "echo 動いてはいけない; exit 1"},
@@ -27,7 +28,7 @@ echo "### まとめの見出し" >> "$GITHUB_STEP_SUMMARY"`},
 	if r.Conclusion != "success" {
 		t.Fatalf("失敗：%+v\n%s", r, log)
 	}
-	for _, want := range []string{"出力=true", "環境=こんにちは", "合図=push", "sha=" + e.sha, "ref=main", "repo=acme/widget", "CI=true", "番号=1", "鍵=***", "まとめの見出し", "失敗しても続けた", "改行の数=1"} {
+	for _, want := range []string{"出力=true", "環境=こんにちは", "合図=push", "sha=" + e.sha, "ref=main", "repo=acme/widget", "CI=true", "番号=1", "鍵=***", "まとめの見出し", "失敗しても続けた", "改行の数=1", "GITHUB_ENV の UPBEATER_KEYS は Upbeater が使う名前のため"} {
 		if !strings.Contains(log, want) {
 			t.Errorf("ログに %q がない\n%s", want, log)
 		}
