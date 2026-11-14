@@ -80,6 +80,8 @@ jobs:
 - 成果物を R2 に置き、Hub が Ed25519 で署名したマニフェストを発行し、各端末の Upbeater アプリへ通知する（Android：FCM、iOS・macOS：APNs、Linux：WebSocket）
 - 端末は署名と SHA-256 を検証してからインストールし、結果を報告する
 - **Android**：PackageInstaller。Android 12 以降、Upbeater が導入元なら確認なしで更新できる
+  - Upbeater アプリ自身の Android 版は、自宅の Mac で組み立てて固定の鍵で署名し（`.upbeater/android-keygen.yml` で一度だけ作る。鍵は Mac の `~/.upbeater/android-signing` に置き、控えを取る）、`.upbeater/app-android.yml` で配る。versionCode は実行番号
+  - 最初の 1 回だけは、同じ Wi-Fi の端末へ Mac から直接入れる（`.upbeater/android-install.yml`。端末のワイヤレス デバッグの接続先と、初回はペア設定のコードを入力で渡す）。配布と同じファイルを入れるため、端末は導入済みの APK の SHA-256 が配布の版と同じなら導入済みとして扱う（自分自身の更新でアプリが入れ替え中に終了した後も同じ）
 - **macOS**：`.app` を差し替えて再起動
 - **Linux**：AppImage を差し替えて再起動
 - **iOS**：組み込み部品 `install-ios`（macOS の Runner）で、Mac とペアリング済みの iPhone・iPad に同じ Wi-Fi 越しで `.app` を入れる（`xcrun devicectl`）。有料の Apple Developer 登録は使わず、Xcode に入れた Apple ID（無料）で署名する。Runner は証明書のチーム ID を `$UPBEATER_APPLE_TEAM` で渡す（例 `xcodebuild … -allowProvisioningUpdates DEVELOPMENT_TEAM=$UPBEATER_APPLE_TEAM`）。無料の署名は 7 日で切れるため、定期実行（例 `schedule: ['0 3 */3 * *']`）で組み立て直して入れ直す。`with`：`app`（.app のパス・必須）、`device`（名前か UDID。改行で複数。省くとペアリング済みで届くすべて）。届かない時は手順を失敗にし、次の実行で入れる。無料の署名で入れられるアプリは 1 台に 3 つまで（Apple の制限）。上限に達して断られた時は、その理由を日本語でログに出す

@@ -1,0 +1,78 @@
+# Upbeater アプリ（Android 版）を組み立てて署名し、登録した Android 端末へ配る。手動実行の時だけ動かす。
+# - 自宅の Mac の実行役（macos）で動く。署名の鍵は .upbeater/android-keygen.yml で作ったもの
+# - 版番号（versionCode）は Upbeater の実行番号（リポジトリの中で必ず増える）
+# - 端末に埋め込む公開鍵は、組み立てのたびに Hub の GET /v1/keys から取る
+# - 組み立てた APK は Mac の ~/.upbeater/android/Upbeater.apk にも置く（最初の 1 回の導入 android-install.yml で使う）
+name: app-android
+on:
+  manual: {}
+env:
+  FLUTTER_VERSION: 3.47.7
+  HUB: https://upbeater-hub.twilight-star-9d9d.workers.dev
+jobs:
+  build:
+    name: 組み立て・署名・配布
+    runs-on: macos
+    timeout: 60
+    concurrency: { group: upbeater-app-android, cancel-in-progress: false }
+    steps:
+      - uses: checkout
+      - uses: setup-java
+        with:
+          java-version: 17
+      - uses: setup-flutter
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+      - run: flutter pub get
+        working-directory: app
+      - run: flutter analyze
+        working-directory: app
+      - run: flutter test
+        working-directory: app
+
+      - name: Upbeater の公開鍵
+        run: |
+          set -euo pipefail
+          KEYS="$(curl -fsS --max-time 20 "$HUB/v1/keys")" || { echo "Hub の公開鍵を取れません（Hub の署名鍵が未設定なら .upbeater/hub-signing-key.yml を先に実行）"; exit 1; }
+          PUB="$(printf '%s' "$KEYS" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps({str(k["gen"]): k["jwk"]["x"] for k in d["keys"] if k["status"] != "revoked"}, separators=(",",":")))')"
+          REV="$(printf '%s' "$KEYS" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(",".join(str(k["gen"]) for k in d["keys"] if k["status"] == "revoked"))')"
+          [ "$PUB" != "{}" ] || { echo "使える公開鍵がありません"; exit 1; }
+          echo "UPBEATER_PUBLIC_KEYS=$PUB" >> "$GITHUB_ENV"
+          echo "UPBEATER_REVOKED=$REV" >> "$GITHUB_ENV"
+          echo "埋め込む公開鍵の世代：$(printf '%s' "$PUB" | python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)))')"
+
+      - name: 組み立てる
+        working-directory: app
+        run: |
+          set -euo pipefail
+          flutter build apk --release --build-number="$GITHUB_RUN_NUMBER" \
+            --dart-define=UPBEATER_PUBLIC_KEYS="$UPBEATER_PUBLIC_KEYS" \
+            --dart-define=UPBEATER_REVOKED_GENERATIONS="$UPBEATER_REVOKED"
+
+      - name: 署名する
+        run: |
+          set -euo pipefail
+          DIR="$HOME/.upbeater/android-signing"
+          [ -f "$DIR/upbeater.jks" ] && [ -f "$DIR/pass" ] || { echo "署名の鍵がありません。先に .upbeater/android-keygen.yml を実行してください"; exit 1; }
+          export KS_PASS="$(cat "$DIR/pass")"
+          SDK="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
+          BT="$(ls -d "$SDK"/build-tools/*/ 2>/dev/null | sort -V | tail -1)"
+          [ -x "$BT/apksigner" ] && [ -x "$BT/zipalign" ] || { echo "Android SDK の build-tools が見つかりません：$SDK"; exit 1; }
+          rm -rf out && mkdir -p out
+          "$BT/zipalign" -f -p 4 app/build/app/outputs/flutter-apk/app-release.apk "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" sign --ks "$DIR/upbeater.jks" --ks-key-alias upbeater --ks-pass env:KS_PASS --key-pass env:KS_PASS \
+            --v4-signing-enabled false --out out/Upbeater.apk "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" verify --print-certs out/Upbeater.apk | grep -E "SHA-256" | head -1
+          rm -f "$RUNNER_TEMP/aligned.apk" out/*.idsig
+          # 最初の 1 回の導入（android-install.yml）用に、同じファイルを Mac に置く
+          mkdir -p "$HOME/.upbeater/android"
+          cp out/Upbeater.apk "$HOME/.upbeater/android/Upbeater.apk"
+          echo "$GITHUB_RUN_NUMBER" > "$HOME/.upbeater/android/Upbeater.version"
+          ls -la out/Upbeater.apk
+          echo "versionCode $GITHUB_RUN_NUMBER で署名しました"
+
+      - distribute:
+          platform: android
+          file: out/Upbeater.apk
+          install:
+            package: com.upbeater.upbeater

@@ -1,0 +1,81 @@
+# Upbeater アプリ（Android 版）を、同じ Wi-Fi にいる Android 端末へ Mac から直接入れる（最初の 1 回用。手動実行）。
+# 2 回目からは端末の Upbeater が自分で更新するので、これは使わない。
+# - 先に .upbeater/app-android.yml を実行しておく（Mac の ~/.upbeater/android/Upbeater.apk を入れる）
+# - 端末側：開発者向けオプション → ワイヤレス デバッグを有効にする
+# - 入力（MCP の run_workflow の inputs）
+#     connect_address：ワイヤレス デバッグの画面の「IP アドレスとポート」（例 192.168.1.20:37123）。必須
+#     pair_address・pair_code：「ペア設定コードによるデバイスのペア設定」に出る IP アドレスとポート・6 桁のコード。
+#                              その Mac と初めてつなぐ時だけ必要（コードの画面を開いたまま実行する）
+name: android-install
+on:
+  manual:
+    inputs:
+      connect_address:
+        description: ワイヤレス デバッグの画面の「IP アドレスとポート」
+        required: true
+      pair_address:
+        description: ペア設定の画面の IP アドレスとポート（初めての時だけ）
+      pair_code:
+        description: ペア設定の画面の 6 桁のコード（初めての時だけ）
+jobs:
+  install:
+    name: Android 端末に入れる
+    runs-on: macos
+    timeout: 10
+    concurrency: { group: upbeater-android-install, cancel-in-progress: false }
+    steps:
+      - name: つないで入れる
+        env:
+          CONNECT_ADDRESS: ${{ inputs.connect_address }}
+          PAIR_ADDRESS: ${{ inputs.pair_address }}
+          PAIR_CODE: ${{ inputs.pair_code }}
+        run: |
+          set -euo pipefail
+          APK="$HOME/.upbeater/android/Upbeater.apk"
+          [ -f "$APK" ] || { echo "入れる APK がありません。先に .upbeater/app-android.yml を実行してください"; exit 1; }
+          ADDR_RE='^([0-9]{1,3}(\.[0-9]{1,3}){3}|\[[0-9A-Fa-f:]+\]):[0-9]{1,5}$'
+          [[ "$CONNECT_ADDRESS" =~ $ADDR_RE ]] || { echo "connect_address（例 192.168.1.20:37123）を入れてください"; exit 1; }
+          if [ -n "$PAIR_CODE$PAIR_ADDRESS" ]; then
+            [[ "$PAIR_ADDRESS" =~ $ADDR_RE ]] || { echo "pair_address の形が正しくありません"; exit 1; }
+            [[ "$PAIR_CODE" =~ ^[0-9]{6}$ ]] || { echo "pair_code は 6 桁の数字です"; exit 1; }
+          fi
+
+          # adb（Android SDK の platform-tools）。無ければ sdkmanager で入れる
+          SDK="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
+          ADB="$SDK/platform-tools/adb"
+          if [ ! -x "$ADB" ]; then
+            SDKM="$SDK/cmdline-tools/latest/bin/sdkmanager"
+            [ -x "$SDKM" ] || { echo "Android SDK が見つかりません：$SDK"; exit 1; }
+            "$SDKM" "platform-tools" > /dev/null
+          fi
+          "$ADB" start-server > /dev/null 2>&1 || true
+
+          if [ -n "$PAIR_CODE" ]; then
+            echo "ペア設定をしています：$PAIR_ADDRESS"
+            OUT="$("$ADB" pair "$PAIR_ADDRESS" "$PAIR_CODE" 2>&1 || true)"
+            case "$OUT" in
+              *Successfully*) echo "ペア設定ができました" ;;
+              *) echo "ペア設定に失敗しました（コードの画面が閉じた・コードが違う・同じ Wi-Fi にいない、のいずれか）"; echo "$OUT" | grep -v "$PAIR_CODE" | head -5; exit 1 ;;
+            esac
+          fi
+
+          trap '"$ADB" disconnect "$CONNECT_ADDRESS" > /dev/null 2>&1 || true' EXIT
+          OK=0
+          for i in 1 2 3; do
+            OUT="$("$ADB" connect "$CONNECT_ADDRESS" 2>&1 || true)"
+            case "$OUT" in *"connected to"*) OK=1; break ;; esac
+            sleep 5
+          done
+          [ "$OK" = 1 ] || { echo "端末につながりません（ワイヤレス デバッグが有効か・同じ Wi-Fi か・IP アドレスとポートが合っているか確かめてください）"; echo "$OUT" | head -3; exit 1; }
+          "$ADB" -s "$CONNECT_ADDRESS" wait-for-device
+          echo "つながりました：$("$ADB" -s "$CONNECT_ADDRESS" shell getprop ro.product.model | tr -d '\r')（Android $("$ADB" -s "$CONNECT_ADDRESS" shell getprop ro.build.version.release | tr -d '\r')）"
+
+          # 同じファイルを入れる（端末の Upbeater が、配布の版と同じ中身だと分かるように）
+          if ! OUT="$("$ADB" -s "$CONNECT_ADDRESS" install -r --no-incremental "$APK" 2>&1)"; then
+            echo "導入に失敗しました"; echo "$OUT" | tail -3
+            case "$OUT" in *INSTALL_FAILED_UPDATE_INCOMPATIBLE*) echo "端末に別の署名の Upbeater が入っています。端末で Upbeater を削除してから、もう一度実行してください" ;; esac
+            exit 1
+          fi
+          V="$("$ADB" -s "$CONNECT_ADDRESS" shell dumpsys package com.upbeater.upbeater | grep -m1 -oE 'versionCode=[0-9]+' || true)"
+          [ -n "$V" ] || { echo "導入後に Upbeater が見つかりません"; exit 1; }
+          echo "Upbeater を入れました（$V）"

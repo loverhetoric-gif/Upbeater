@@ -1,0 +1,36 @@
+# Upbeater アプリ（Android 版）の署名の鍵を、自宅の Mac に作る。手動実行の時だけ動かす。
+# - 鍵は ~/.upbeater/android-signing/upbeater.jks、パスワードは同じ場所の pass（どちらも権限 600）。リポジトリ・ログに出さない
+# - すでにあれば何も変えない（鍵を変えると、端末の Upbeater を上書きで更新できなくなるため）
+# - 作ったら、利用者が ~/.upbeater/android-signing の控えを取る（無くすと、端末で消して入れ直すことになる）
+name: android-keygen
+on:
+  manual: {}
+jobs:
+  keygen:
+    name: 署名の鍵を作る
+    runs-on: macos
+    timeout: 10
+    steps:
+      - name: 鍵を作る（あれば何もしない）
+        run: |
+          set -euo pipefail
+          DIR="$HOME/.upbeater/android-signing"
+          KS="$DIR/upbeater.jks"
+          PASSFILE="$DIR/pass"
+          if [ -f "$KS" ] || [ -f "$PASSFILE" ]; then
+            [ -f "$KS" ] && [ -f "$PASSFILE" ] || { echo "鍵とパスワードの片方だけがあります。止めます（手で確かめてください）: $DIR"; exit 1; }
+            echo "鍵はすでにあります（変えません）"
+          else
+            mkdir -p "$DIR"
+            chmod 700 "$DIR"
+            umask 077
+            openssl rand -base64 48 | tr -d '/+=\n' | cut -c1-40 > "$PASSFILE"
+            KSP="$(cat "$PASSFILE")" keytool -genkeypair -keystore "$KS" -storetype PKCS12 -alias upbeater \
+              -keyalg RSA -keysize 4096 -validity 36500 -dname "CN=Upbeater, O=Upbeater" \
+              -storepass:env KSP -keypass:env KSP
+            chmod 600 "$KS" "$PASSFILE"
+            echo "鍵を作りました: $KS"
+          fi
+          # 公開してよい値（証明書の指紋）だけを表示する
+          KSP="$(cat "$PASSFILE")" keytool -list -v -keystore "$KS" -alias upbeater -storepass:env KSP | grep -E "SHA256:" | head -1
+          echo "この Mac の $DIR の控え（Time Machine など）を取ってください"
