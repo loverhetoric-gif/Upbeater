@@ -138,7 +138,7 @@ Hub（`src/cloud.ts`・テスト `test/cloud.test.ts`、計 103 件）、Runner�
 
 ### 残り
 
-- 本番の署名鍵（Secret `MANIFEST_SIGNING_KEYS`）を入れる。入れるまで、照合は「署名が設定されていません」（503）を返す
+- 本番の署名鍵（Secret `MANIFEST_SIGNING_KEYS`）を入れる。入れるまで、照合は「署名が設定されていません」（503）を返す。手順は `hub/scripts/signing-key.mjs`（Mac の実行役で `.upbeater/hub-signing-key.yml` を手動実行。無ければ作って入れ、あれば変えない。秘密の部分は `~/.upbeater/hub-secrets.json` だけ）
 - 端末アプリの組み立てに公開鍵を埋め込む（`--dart-define UPBEATER_PUBLIC_KEYS='{"1":"<x>"}'`。値は `GET /v1/keys`）。Linux のアプリ（AppImage）は未実装
 
 ## 終わったこと：iPhone へのワイヤレス導入（install-ios）
