@@ -39,6 +39,8 @@
     "GITHUB_APP_CLIENT_ID": "",
     // Hub 自身の URL（クラウド Runner に渡す）
     "HUB_URL": "https://upbeater-hub.twilight-star-9d9d.workers.dev",
+    // LIFElive（開発の見張り）へ合図を渡す先。LIFElive は GitHub を読まず、ここから届く合図でアプリ一覧を新しくする
+    "LIFELIVE_EVENTS_URL": "https://lifelive-api.twilight-star-9d9d.workers.dev/github-events",
     // クラウド Runner（cloud-runner/deploy.sh が出す値。空の間は使わない）
     "GCP_PROJECT": "",
     "GCP_REGION": "",

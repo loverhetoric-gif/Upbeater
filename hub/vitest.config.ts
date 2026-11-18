@@ -48,6 +48,8 @@ export default defineConfig(async () => {
             GCP_SERVICE_ACCOUNT_KEY: JSON.stringify({ client_email: "runner@test-project.iam.gserviceaccount.com", private_key: sa.privateKey }),
             GCP_TOKEN_URL: "https://github-mock.test/__gcp/token",
             GCP_RUN_BASE: "https://github-mock.test/__gcp/run",
+            // LIFElive へは渡さない（受け渡しは test/lifelive.test.ts で確かめる）
+            LIFELIVE_EVENTS_URL: "",
           },
           serviceBindings: { GITHUB_API: "github-mock", GCP_API: "github-mock" },
           workers: [
