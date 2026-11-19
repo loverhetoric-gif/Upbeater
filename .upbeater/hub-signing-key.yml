@@ -18,4 +18,4 @@ jobs:
           set -euo pipefail
           npm ci --no-audit --no-fund > /dev/null
           node scripts/signing-key.mjs
-          curl -fsS --max-time 20 https://upbeater-hub.twilight-star-9d9d.workers.dev/v1/keys && echo
+          curl -fsS --max-time 20 https://upbeater.loverhetoric.com/v1/keys && echo

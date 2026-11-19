@@ -38,7 +38,7 @@
     // GitHub App の Client ID（秘密情報ではない。空の間は MCP のログインが使えない）
     "GITHUB_APP_CLIENT_ID": "",
     // Hub 自身の URL（クラウド Runner に渡す）
-    "HUB_URL": "https://upbeater-hub.twilight-star-9d9d.workers.dev",
+    "HUB_URL": "https://upbeater.loverhetoric.com",
     // クラウド Runner（cloud-runner/deploy.sh が出す値。空の間は使わない）
     "GCP_PROJECT": "",
     "GCP_REGION": "",
