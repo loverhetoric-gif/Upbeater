@@ -76,7 +76,7 @@ Upbeater は GitHub Actions の代替（`docs/DESIGN.md`）。開発順序は DE
 | Runner | 未：利用者の Mac で組み立てて登録する（`runner/README.md`） |
 | D1 | 作成済み：`upbeater`（APAC、ID は `hub/wrangler.jsonc`）。スキーマは公開の手順で適用する |
 | R2 | 済み：`upbeater-blobs` |
-| 公開・Secret の投入・Webhook の設定 | 済み：`https://upbeater-hub.twilight-star-9d9d.workers.dev`（`hub/scripts/deploy.mjs` を利用者の Mac で実行。秘密情報は `~/.upbeater/hub-secrets.json`） |
+| 公開・Secret の投入・Webhook の設定 | 済み：`https://upbeater.loverhetoric.com`（2026-11-19 に独自ドメインへ移した。旧 `https://upbeater-hub.twilight-star-9d9d.workers.dev` も止めるまで同じく動く。`hub/scripts/deploy.mjs` を利用者の Mac で実行。秘密情報は `~/.upbeater/hub-secrets.json`） |
 
 ## 残り（hub）
 
@@ -122,7 +122,7 @@ LIFElive の main に `.upbeater/build.yml`・`deploy.yml` が入り、`.github/
 
 ### 残り
 
-- GitHub App の Client secret を作り、Secret `GITHUB_APP_CLIENT_SECRET` に入れる。`wrangler.jsonc` の `GITHUB_APP_CLIENT_ID` を App の Client ID にする。App の Callback URL に `https://upbeater-hub.twilight-star-9d9d.workers.dev/oauth/github/callback` を入れる。済めば claude.ai のコネクタに `https://upbeater-hub.twilight-star-9d9d.workers.dev/mcp` を足せる
+- GitHub App の Client secret を作り、Secret `GITHUB_APP_CLIENT_SECRET` に入れる。`wrangler.jsonc` の `GITHUB_APP_CLIENT_ID` を App の Client ID にする。App の Callback URL に `https://upbeater.loverhetoric.com/oauth/github/callback` を入れる（旧 workers.dev の分も止めるまで残す。Callback URL は複数登録できる）。済めば claude.ai のコネクタに `https://upbeater.loverhetoric.com/mcp` を足せる
 
 ## 終わったこと：開発順序5「クラウド Runner」（コード）
 
