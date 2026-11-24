@@ -40,8 +40,8 @@
     "GITHUB_APP_CLIENT_ID": "",
     // Hub 自身の URL（クラウド Runner に渡す）
     "HUB_URL": "https://upbeater.loverhetoric.com",
-    // LOVE connect HUB：失敗した実行の知らせの送り先（WORLD ruler. の中継の住所。秘密情報ではない）。空の間は送らない
-    "HUB_WORLDRULERS_URL": "",
+    // LOVE connect HUB：失敗した実行の知らせの送り先（WORLD ruler. の中継の住所。秘密情報ではない）。空にすると送らない
+    "HUB_WORLDRULERS_URL": "https://world-rulers.loverhetoric.com",
     // クラウド Runner（cloud-runner/deploy.sh が出す値。空の間は使わない）
     "GCP_PROJECT": "",
     "GCP_REGION": "",
