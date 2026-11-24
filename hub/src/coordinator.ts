@@ -135,7 +135,11 @@ export class RepoCoordinator extends DurableObject<Env> {
           if (head === null) return { status: "skipped", reason: "ブランチが削除されています" };
           if (head !== sha) {
             const newer = await this.env.DB.prepare("SELECT 1 FROM runs WHERE repo_id = ? AND sha = ? AND event = 'push' LIMIT 1").bind(repo.id, head).first();
-            if (newer) {
+            // マージ直後は GitHub が古い先頭を返すことがある（先頭が、この合図のコミットより古い）。
+            // その古い先頭の実行があるだけで「新しいコミットを処理済み」とみなすと、新しい合図を捨ててしまう（2026-11-24 に実際に起きた）。
+            // 先頭が本当に新しい（または枝分かれ）と確かめられた時だけ捨てる。確かめられない時は、捨てずに実行する
+            const stale = newer ? (await gh.compareStatus(ref, sha, head).catch(() => "behind" as const)) : null;
+            if (newer && stale !== "behind" && stale !== "identical") {
               await recordOperation(this.env, { owner_id: repo.owner_id, repo_id: repo.id, kind: "event", stage: "superseded", status: "ok", detail: { sha, head } });
               return { status: "skipped", reason: "より新しいコミットを処理済みです" };
             }

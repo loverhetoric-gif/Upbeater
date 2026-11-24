@@ -72,6 +72,19 @@ describe("合図の受信（Webhook）", () => {
     expect((await runs()).map((r) => r.sha)).toEqual([b]);
   });
 
+  it("マージ直後に GitHub が古い先頭を返しても、新しい合図を捨てない（2026-11-24 の取りこぼし）", async () => {
+    await registerRepo();
+    const a = await commit("a", { ".upbeater/ci.yml": CI });
+    await webhook("push", push(a)); // 古い先頭 a は処理済み
+    const b = sha("b"); // 新しい先頭 b（親は a）
+    await mock("commit", { repo: REPO, branch: "main", sha: b, files: { ".upbeater/ci.yml": CI }, parents: [a] });
+    // GitHub がまだ古い先頭（a）を返す状況：main を a に戻して b の合図を送る
+    await mock("branch", { repo: REPO, branch: "main", sha: a });
+    const res = await webhook("push", push(b));
+    expect(Object.values(((await res.json()) as any).outcomes)).toEqual(["created"]);
+    expect((await runs()).map((r) => r.sha)).toEqual([a, b]);
+  });
+
   it("強制プッシュで過去のコミットに戻っても、新しい通番の実行になる", async () => {
     await registerRepo();
     const a = await commit("a", { ".upbeater/ci.yml": CI });
