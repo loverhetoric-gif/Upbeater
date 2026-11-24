@@ -164,6 +164,14 @@ Upbeater 自身の検査・公開も Upbeater で行い、Actions は使わな�
 - Actions の台本との互換（Runner）：環境変数 `CI`・`GITHUB_SHA`・`GITHUB_REF`・`GITHUB_REF_NAME`・`GITHUB_EVENT_NAME`（Actions の名前。manual は `workflow_dispatch`）・`GITHUB_REPOSITORY`・`GITHUB_ACTOR`・`GITHUB_RUN_NUMBER`、手順ごとのファイル `GITHUB_OUTPUT`（→ 後の手順の式で `steps.<id>.outputs.<名前>`）・`GITHUB_ENV`（後の手順の環境変数）・`GITHUB_PATH`・`GITHUB_STEP_SUMMARY`（ログに写す）。手順の `id` と `steps.<id>.outcome` を使える。ジョブの env の `${{ secrets.X }}` などは Runner が値にする。成果物は Actions と同じく、指定したものに共通する一番近いフォルダを起点にまとめる（`path: app/build/x.apk` なら、取り出すと `<取り出し先>/x.apk`）
 - concurrency の group には `${{ matrix.x }}` のほか、`${{ ref }}`・`${{ branch }}`・`${{ event }}` を書ける（Hub が実行の値に置き換える）
 
+## 失敗の知らせ（LOVE connect HUB。hub/src/hubout.ts）
+
+- 通知サービスを持たない（上記）ため、実行が失敗しても利用者の iPhone には届かない。失敗の知らせを、LOVE connect HUB の event レーンの封筒 `event.upbeater.run.failed` で WORLD ruler. へ送り、WORLD ruler. が iPhone の通知（種類「エラー」）にする（WORLD ruler. 設計書 9.3、LOVE connect HUB 規格書 第19章）
+- 失敗した実行（`conclusion` が `failure`・`definition_error`）を Cron（5 分ごと）で拾い、封筒を作って署名し、`hub_outbox` に預ける。送り損ねたら同じ封筒のまま間隔を広げて送り直す（上限あり）。届いた（200・DUPLICATE）・通らない（4xx）・諦めた、を記録に残す
+- 本文は `{repo, workflow, run, reason, at}` だけ。ログの本文は入れない。署名は会社ごとの鍵（Worker の秘密情報 `HUB_KEY_LOVERHETORIC`。HMAC-SHA256）。送り先は `HUB_WORLDRULERS_URL`。**鍵か送り先が空の間は何もしない**
+- 見張り（例：ChottoMatte の `collector-watch`）の止まりは、見張りの実行が失敗する形で、同じ封筒に乗る
+- 最初の 1 回は読み進める位置を決めるだけで、過去の失敗は送らない。Cron の式・`RECONCILE_GITHUB` は変えない
+
 ## 移行計画
 
 1. 最大の消費源である LIFElive の `build.yml`・`deploy.yml` を最初に置き換え、実地で検証する
