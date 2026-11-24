@@ -372,12 +372,13 @@ export default {
         return json({ sha, merged: true, message: "Pull Request successfully merged" });
       }
     }
-    if ((m = /^\/compare\/([^.]+)\.\.\.(.+)$/.exec(rest))) {
+    if ((m = /^\/compare\/([^.]+)\.\.\.([^?]+)(?:\?.*)?$/.exec(rest))) {
       const resolve = (x) => S.branches.get(bkey(repo, decodeURIComponent(x))) ?? decodeURIComponent(x);
       const a = resolve(m[1]);
       const b = resolve(m[2]);
       const mb = mergeBase(repo, a, b);
-      return json({ files: [...diff(mb ? treeOf(repo, mb) : {}, treeOf(repo, b)).keys()].map((filename) => ({ filename })) });
+      const status = a === b ? "identical" : mb === a ? "ahead" : mb === b ? "behind" : "diverged";
+      return json({ status, files: [...diff(mb ? treeOf(repo, mb) : {}, treeOf(repo, b)).keys()].map((filename) => ({ filename })) });
     }
     if ((m = /^\/commits\/([^/]+)\/check-runs$/.exec(rest))) {
       const prot = S.protect.get(repo) ?? {};
