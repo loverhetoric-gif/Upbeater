@@ -4,6 +4,7 @@
  * - GitHub の障害・回数制限で定義ファイルを取れない時は、合図を待ち行列（DO の永続領域）に残して間隔を広げて再試行する
  */
 import { DurableObject } from "cloudflare:workers";
+import { autoMergeAfterRun } from "./automerge";
 import { flushChecks } from "./checks";
 import type { Env, RepoRow } from "./env";
 import { createGitHubClient, GitHubError, parseRepo, type WorkflowFile } from "./github";
@@ -82,9 +83,13 @@ export class RepoCoordinator extends DurableObject<Env> {
       case "/advance":
         await this.serial(() => afterJobFinished(this.env, repo, String(body.job_id)));
         await flushChecks(this.env).catch(() => undefined);
+        // 検査が済んだコミットの自動マージを評価する（結果表示の後。直列の処理の外で行い、他の合図を止めない）
+        await autoMergeAfterRun(this.env, createGitHubClient(this.env), repo.id, { job_id: String(body.job_id) }).catch(() => undefined);
         return Response.json({ ok: true });
       case "/advance-run":
         await this.serial(() => advanceRun(this.env, repo, String(body.run_id)));
+        await flushChecks(this.env).catch(() => undefined);
+        await autoMergeAfterRun(this.env, createGitHubClient(this.env), repo.id, { run_id: String(body.run_id) }).catch(() => undefined);
         return Response.json({ ok: true });
       case "/cancel":
         await this.serial(() => cancelRun(this.env, repo, String(body.run_id)));

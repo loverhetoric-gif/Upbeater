@@ -1,6 +1,7 @@
 /**
  * MCP の道具（ツール）。すべて呼び出した利用者（owner_id）のデータだけを扱う
  */
+import { cancelAutoMerge } from "./automerge";
 import { coordinatorCall, type EventOutcome } from "./coordinator";
 import type { Env, JobRow, RepoRow, RunRow } from "./env";
 import { createGitHubClient, GitHubError, parseRepo, type GitHubClient } from "./github";
@@ -100,6 +101,11 @@ const fileSchema: Schema = {
   },
 };
 const mergeMethod: Schema = { type: "string", enum: ["squash", "merge", "rebase"], description: "マージの方法（既定は squash）" };
+const autoMerge: Schema = {
+  type: "boolean",
+  description:
+    "true なら即時にマージせず、自動マージを予約する。検査（.upbeater の実行）がすべて成功し、衝突・ブランチ保護の条件を満たした時に Upbeater がマージする。リポジトリの自動マージを持ち主が有効にしていない時は断る",
+};
 const SECRET_NAME = /^[A-Z_][A-Z0-9_]{0,99}$/;
 
 async function ownedRepo(ctx: ToolContext, full: string): Promise<RepoRow> {
@@ -162,14 +168,23 @@ export const TOOLS: Tool[] = [
     annotations: { readOnlyHint: true },
     async run(ctx) {
       const r = await ctx.env.DB.prepare(
-        `SELECT r.full_name AS repo, r.default_branch, r.paused, r.trigger_on_own_commits, r.created_at,
+        `SELECT r.full_name AS repo, r.default_branch, r.paused, r.trigger_on_own_commits, r.auto_merge_enabled, r.auto_merge_method, r.created_at,
                 (SELECT json_object('number', x.number, 'workflow', x.workflow_file, 'event', x.event, 'status', x.status, 'conclusion', x.conclusion, 'created_at', x.created_at)
                    FROM runs x WHERE x.repo_id = r.id ORDER BY x.number DESC LIMIT 1) AS last_run
          FROM repos r WHERE r.owner_id = ? ORDER BY r.full_name`,
       )
         .bind(ctx.owner_id)
-        .all<{ paused: number; trigger_on_own_commits: number; last_run: string | null }>();
-      return { ok: true, repos: r.results.map((x) => ({ ...x, paused: x.paused === 1, trigger_on_own_commits: x.trigger_on_own_commits === 1, last_run: parseJson(x.last_run) })) };
+        .all<{ paused: number; trigger_on_own_commits: number; auto_merge_enabled: number; auto_merge_method: string; last_run: string | null }>();
+      return {
+        ok: true,
+        repos: r.results.map(({ auto_merge_enabled, auto_merge_method, ...x }) => ({
+          ...x,
+          paused: x.paused === 1,
+          trigger_on_own_commits: x.trigger_on_own_commits === 1,
+          auto_merge: { enabled: auto_merge_enabled === 1, method: auto_merge_method },
+          last_run: parseJson(x.last_run),
+        })),
+      };
     },
   },
   {
@@ -642,10 +657,20 @@ export const TOOLS: Tool[] = [
   {
     name: "open_pr",
     title: "PR の作成",
-    description: "PR を作る（同じブランチの PR が既にあればそれを返す）",
+    description:
+      "PR を作る（同じブランチの PR が既にあればそれを返す）。auto_merge: true で、検査が通ったら Upbeater 自身がマージするよう予約できる（持ち主がリポジトリで自動マージを有効にしている時だけ。AI は有効にできない）",
     inputSchema: {
       type: "object",
-      properties: { repo: repoArg, head: str("作業ブランチ"), base: str("取り込み先（既定はリポジトリの既定ブランチ）"), title: str("題名", 256), body: str("説明", 60000), request_id: requestId },
+      properties: {
+        repo: repoArg,
+        head: str("作業ブランチ"),
+        base: str("取り込み先（既定はリポジトリの既定ブランチ）"),
+        title: str("題名", 256),
+        body: str("説明", 60000),
+        auto_merge: autoMerge,
+        method: mergeMethod,
+        request_id: requestId,
+      },
       required: ["repo", "head", "title"],
     },
     async run(ctx, a) {
@@ -679,6 +704,7 @@ export const TOOLS: Tool[] = [
         base: str("取り込み先（既定はリポジトリの既定ブランチ）"),
         files: fileSchema,
         merge: { type: "boolean", description: "false なら PR の作成までで止める（既定は true）" },
+        auto_merge: autoMerge,
         method: mergeMethod,
         request_id: requestId,
       },
@@ -687,6 +713,36 @@ export const TOOLS: Tool[] = [
     annotations: { destructiveHint: true },
     async run(ctx, a) {
       return shipChangeOp(opCtx(ctx), a as unknown as Parameters<typeof shipChangeOp>[1]);
+    },
+  },
+  {
+    name: "cancel_auto_merge",
+    title: "自動マージの取り消し",
+    description: "自動マージの予約を取り消す（待機中・止まっている予約だけ。マージ済みのものは戻せない）。PR は残る",
+    inputSchema: { type: "object", properties: { repo: repoArg, number: int("PR の番号", 1) }, required: ["repo", "number"] },
+    annotations: { idempotentHint: true },
+    async run(ctx, a) {
+      const repo = await ownedRepo(ctx, a.repo as string);
+      const r = await cancelAutoMerge(ctx.env, ctx.owner_id, repo, a.number as number);
+      if (!r.ok) return { ok: false, stage: "cancel_auto_merge", code: r.code ?? "failed", reason: r.reason ?? "取り消せませんでした", retryable: r.code === "merging" || r.code === "conflict", needs_human: false };
+      return { ok: true, repo: repo.full_name, number: a.number, status: r.status };
+    },
+  },
+  {
+    name: "set_auto_merge",
+    title: "自動マージの無効化",
+    description:
+      "リポジトリの自動マージを無効にする（安全な向きだけ）。有効にできるのは持ち主だけで、AI からは有効にできない（管理 API で持ち主が設定する）。現在の設定は list_repos で確かめられる",
+    inputSchema: { type: "object", properties: { repo: repoArg, enabled: { type: "boolean", description: "false だけ指定できる" } }, required: ["repo", "enabled"] },
+    annotations: { idempotentHint: true },
+    async run(ctx, a) {
+      const repo = await ownedRepo(ctx, a.repo as string);
+      if (a.enabled !== false) {
+        throw new OpError("owner_only", "自動マージを有効にできるのは持ち主だけです（AI からは有効にできません）。持ち主が管理 API（PUT /v1/admin/auto-merge）で設定してください", { needsHuman: true });
+      }
+      await ctx.env.DB.prepare("UPDATE repos SET auto_merge_enabled = 0 WHERE id = ?").bind(repo.id).run();
+      await recordOperation(ctx.env, { owner_id: ctx.owner_id, repo_id: repo.id, kind: "auto_merge", stage: "setting_disabled", status: "ok", reason: "自動マージを無効にしました" });
+      return { ok: true, repo: repo.full_name, enabled: false };
     },
   },
   {
@@ -700,7 +756,23 @@ export const TOOLS: Tool[] = [
         .bind(ctx.owner_id, a.request_id)
         .first<{ result: string | null; error: string | null }>();
       if (!r) return { ok: false, code: "not_found", reason: "その依頼 ID は見つかりません" };
-      return { ok: true, ...r, result: parseJson(r.result), error: parseJson(r.error) };
+      // 自動マージの予約があれば、いまの状態と履歴（予約・待機・マージ・失敗の理由）を添える
+      const am = await ctx.env.DB.prepare(
+        "SELECT a.repo_id, a.pr_number, a.status, a.code, a.reason, a.head_sha, a.attempts, a.merge_commit_sha, a.next_check_at, a.updated_at FROM auto_merges a WHERE a.owner_id = ? AND a.request_id = ?",
+      )
+        .bind(ctx.owner_id, a.request_id)
+        .first<{ repo_id: string; pr_number: number }>();
+      let auto_merge: unknown;
+      if (am) {
+        const { repo_id, ...cur } = am;
+        const hist = await ctx.env.DB.prepare(
+          "SELECT stage, status, reason, needs_human, detail, created_at FROM operations WHERE owner_id = ? AND repo_id = ? AND kind = 'auto_merge' AND json_extract(detail, '$.pr_number') = ? ORDER BY id DESC LIMIT 20",
+        )
+          .bind(ctx.owner_id, repo_id, am.pr_number)
+          .all<{ needs_human: number; detail: string | null }>();
+        auto_merge = { ...cur, history: hist.results.map((h) => ({ ...h, needs_human: h.needs_human === 1, detail: parseJson(h.detail) })) };
+      }
+      return { ok: true, ...r, result: parseJson(r.result), error: parseJson(r.error), ...(auto_merge ? { auto_merge } : {}) };
     },
   },
 ];

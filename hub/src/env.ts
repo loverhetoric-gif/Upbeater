@@ -62,6 +62,9 @@ export interface RepoRow {
   last_reconciled_at: number | null;
   next_run_number: number;
   paused: number;
+  /** 検査通過後の自動マージ（持ち主だけが有効にできる。既定は 0） */
+  auto_merge_enabled: number;
+  auto_merge_method: string;
   created_at: number;
 }
 
