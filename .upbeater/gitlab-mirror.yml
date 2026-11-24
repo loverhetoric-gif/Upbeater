@@ -23,7 +23,7 @@ jobs:
         Love-Factory
         Upbeater
         LIFElive
-        HiddenGateExchanger
+        HeavyWorker
         NSC
     steps:
       - name: GitHub から取り込み、GitLab へ送る
