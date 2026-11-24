@@ -20,8 +20,8 @@ async function failedRun(conclusion: "failure" | "success" = "failure") {
 
 describe("LOVE connect HUB への失敗の知らせ", () => {
   it("鍵か送り先が無い間は何もしない", async () => {
-    expect(await runHubOut({ ...env, HUB_WORLDRULERS_URL: "https://relay.test" } as Env)).toBeNull();
-    expect(await runHubOut({ ...env, HUB_KEY_LOVERHETORIC: KEY } as Env)).toBeNull();
+    expect(await runHubOut({ ...env, HUB_KEY_LOVERHETORIC: undefined, HUB_WORLDRULERS_URL: "https://relay.test" } as Env)).toBeNull();
+    expect(await runHubOut({ ...env, HUB_KEY_LOVERHETORIC: KEY, HUB_WORLDRULERS_URL: "" } as Env)).toBeNull();
   });
 
   it("最初の 1 回は位置を決めるだけで、過去の失敗は送らない", async () => {
