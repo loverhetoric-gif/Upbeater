@@ -7,10 +7,11 @@ import type { Env, JobRow, RepoRow, RunRow } from "./env";
 import { createGitHubClient, GitHubError, parseRepo, type GitHubClient } from "./github";
 import { checkBranchName, checkRepoName, commitFilesOp, createBranchOp, mergePrOp, openPrOp, OpError, shipChangeOp, type FileChange, type OpContext, type OpResult } from "./gitops";
 import { HttpError } from "./http";
-import { recordOperation } from "./operations";
+import { operationStatement, recordOperation } from "./operations";
+import { sha256Hex } from "./crypto";
 import { assembleLogs } from "./routes/runner";
 import { createSecretForm } from "./routes/secret-form";
-import { createDeviceCode } from "./distribute";
+import { createDeviceCode, targetsOf } from "./distribute";
 import { convertWorkflow, type ConvertResult } from "./workflow/convert";
 
 // ───────── 入力の検証（JSON Schema の部分集合） ─────────
@@ -113,6 +114,19 @@ async function ownedRepo(ctx: ToolContext, full: string): Promise<RepoRow> {
   const r = await ctx.env.DB.prepare("SELECT * FROM repos WHERE owner_id = ? AND full_name = ?").bind(ctx.owner_id, `${ref.owner}/${ref.name}`).first<RepoRow>();
   if (!r) throw new OpError("repo_not_found", `${full} は Upbeater に登録されていません（register_repo で登録してください）`);
   return r;
+}
+
+/**
+ * 端末を、呼び出した利用者（owner_id）の登録端末の中から、名前（または端末の ID）で探す。
+ * 他の利用者の端末は、無いものとして扱う（あるかどうかも知らせない）。OS が配布の OS と違うときは、その旨を知らせる
+ */
+async function ownedDevice(ctx: ToolContext, ref: string, platform: string): Promise<{ id: string; name: string }> {
+  const r = await ctx.env.DB.prepare("SELECT id, name, os FROM devices WHERE owner_id = ? AND (name = ? OR id = ?) ORDER BY created_at, id").bind(ctx.owner_id, ref, ref).all<{ id: string; name: string; os: string }>();
+  if (r.results.length === 0) throw new OpError("device_not_found", `端末「${ref}」は登録されていません（list_devices で名前を確かめてください）`);
+  if (r.results.length > 1) throw new OpError("device_name_ambiguous", `端末名「${ref}」が ${r.results.length} 台あります。list_devices の id で指定してください`);
+  const d = r.results[0]!;
+  if (d.os !== platform) throw new OpError("device_os_mismatch", `端末「${d.name}」は ${d.os} の端末です。${platform} の配布先には指定できません`);
+  return { id: d.id, name: d.name };
 }
 
 async function ownedRun(ctx: ToolContext, id: string): Promise<RunRow> {
@@ -521,12 +535,28 @@ export const TOOLS: Tool[] = [
         .bind(repo.id)
         .all<{ platform: string }>();
       const settings = await ctx.env.DB.prepare("SELECT platform, paused, pinned_seq, staged, canary_device_id FROM dist_settings WHERE repo_id = ?").bind(repo.id).all();
-      const installs = await ctx.env.DB.prepare(
-        "SELECT d.name AS device, d.os, i.seq, i.status, i.message, i.updated_at, d.last_seen_at FROM installs i JOIN devices d ON d.id = i.device_id WHERE i.repo_id = ? ORDER BY d.name",
+      // 配布先の端末の指定（OS ごと）。指定が無い OS は出さない（その OS の登録端末すべてに配る）
+      const targetRows = await ctx.env.DB.prepare(
+        "SELECT t.platform, t.device_id AS id, d.name FROM dist_targets t LEFT JOIN devices d ON d.id = t.device_id WHERE t.repo_id = ? ORDER BY t.platform, d.created_at, d.id",
       )
         .bind(repo.id)
-        .all();
-      return { ok: true, repo: repo.full_name, releases: rel.results, settings: settings.results, devices: installs.results };
+        .all<{ platform: string; id: string; name: string | null }>();
+      const targets: { platform: string; devices: { id: string; name: string }[] }[] = [];
+      for (const t of targetRows.results) {
+        let g = targets.find((x) => x.platform === t.platform);
+        if (!g) targets.push((g = { platform: t.platform, devices: [] }));
+        if (t.name !== null) g.devices.push({ id: t.id, name: t.name });
+      }
+      // targeted：その端末にいま配られるか（指定が無い OS はすべて true）
+      const installs = await ctx.env.DB.prepare(
+        `SELECT d.name AS device, d.os, i.seq, i.status, i.message, i.updated_at, d.last_seen_at,
+                CASE WHEN NOT EXISTS (SELECT 1 FROM dist_targets t WHERE t.repo_id = i.repo_id AND t.platform = i.platform) THEN 1
+                     WHEN EXISTS (SELECT 1 FROM dist_targets t WHERE t.repo_id = i.repo_id AND t.platform = i.platform AND t.device_id = d.id) THEN 1 ELSE 0 END AS targeted
+         FROM installs i JOIN devices d ON d.id = i.device_id WHERE i.repo_id = ? ORDER BY d.name`,
+      )
+        .bind(repo.id)
+        .all<Record<string, unknown>>();
+      return { ok: true, repo: repo.full_name, releases: rel.results, settings: settings.results, targets, devices: installs.results.map((x) => ({ ...x, targeted: x.targeted === 1 })) };
     },
   },
   {
@@ -576,7 +606,10 @@ export const TOOLS: Tool[] = [
   {
     name: "set_distribution",
     title: "配布の設定",
-    description: "OS ごとの配布の一時停止と段階配信（先行する 1 台で入れ終えてから残り全台）を設定する",
+    description:
+      "OS ごとの配布の一時停止・段階配信（先行する 1 台で入れ終えてから残り全台）・配布先の端末の指定を設定する。" +
+      "devices に端末名（list_devices の名前か id）の配列を渡すと、その端末だけに配る（同じ OS の端末だけ。空配列 [] で指定を解除して、その OS の登録端末すべてに戻す。省くと今のまま）。" +
+      "指定した端末の台数が少ないときは、失敗で止める台数もその台数に下がる（1 台だけなら、その 1 台の失敗で止まる）",
     inputSchema: {
       type: "object",
       properties: {
@@ -584,40 +617,71 @@ export const TOOLS: Tool[] = [
         platform: { type: "string", enum: ["android", "ios", "macos", "linux"], description: "OS" },
         paused: { type: "boolean", description: "配布を止める" },
         staged: { type: "boolean", description: "段階配信にする" },
-        canary_device: str("先行する端末の名前（省くと、その OS で最初に登録した端末）", 100),
+        canary_device: str("先行する端末の名前（省くと、その OS で最初に登録した端末。配布先の指定があれば、その中で最初に登録した端末）。配布先の指定の中から選ぶ", 100),
+        devices: { type: "array", items: { type: "string", maxLength: 100 }, maxItems: 100, description: "配布先の端末の名前（または id）の配列。[] で解除" },
       },
       required: ["repo", "platform"],
     },
     annotations: { idempotentHint: true },
     async run(ctx, a) {
       const repo = await ownedRepo(ctx, a.repo as string);
-      let canary: string | null = null;
-      if (a.canary_device) {
-        const d = await ctx.env.DB.prepare("SELECT id FROM devices WHERE owner_id = ? AND name = ? AND os = ?").bind(ctx.owner_id, a.canary_device, a.platform).first<{ id: string }>();
-        if (!d) throw new OpError("device_not_found", `端末「${a.canary_device}」（${a.platform}）はありません`);
-        canary = d.id;
+      const platform = a.platform as string;
+      // 配布先：渡されたら、全部の端末を確かめてから（1 台でも違えば何も変えずに）置き換える
+      let newTargets: { id: string; name: string }[] | undefined;
+      if (a.devices !== undefined) {
+        newTargets = [];
+        for (const ref of a.devices as string[]) {
+          const d = await ownedDevice(ctx, ref, platform);
+          if (!newTargets.some((x) => x.id === d.id)) newTargets.push(d);
+        }
       }
-      const cur = await ctx.env.DB.prepare("SELECT paused, staged, canary_device_id FROM dist_settings WHERE repo_id = ? AND platform = ?").bind(repo.id, a.platform).first<{ paused: number; staged: number; canary_device_id: string | null }>();
+      const canaryDev = a.canary_device ? await ownedDevice(ctx, a.canary_device as string, platform) : null;
+      const cur = await ctx.env.DB.prepare("SELECT paused, staged, canary_device_id FROM dist_settings WHERE repo_id = ? AND platform = ?").bind(repo.id, platform).first<{ paused: number; staged: number; canary_device_id: string | null }>();
+      // 設定したあとの配布先（null は指定なし）。devices を省いたときは今の指定のまま
+      const after: string[] | null = newTargets !== undefined ? (newTargets.length > 0 ? newTargets.map((x) => x.id) : null) : await targetsOf(ctx.env, repo.id, platform);
+      if (canaryDev && after !== null && !after.includes(canaryDev.id)) {
+        throw new OpError("canary_not_in_targets", `先行する端末「${canaryDev.name}」は配布先に入っていません。配布先の端末の中から選んでください`);
+      }
+      // 今の先行する端末が新しい配布先から外れるときは、指定を外して、配布先の中で最初に登録した端末にする
+      let canary = canaryDev?.id ?? cur?.canary_device_id ?? null;
+      if (!canaryDev && canary !== null && after !== null && !after.includes(canary)) canary = null;
       const paused = a.paused === undefined ? (cur?.paused ?? 0) : a.paused ? 1 : 0;
       const staged = a.staged === undefined ? (cur?.staged ?? 0) : a.staged ? 1 : 0;
-      await ctx.env.DB.prepare(
-        `INSERT INTO dist_settings (owner_id, repo_id, platform, paused, staged, canary_device_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (repo_id, platform) DO UPDATE SET paused = excluded.paused, staged = excluded.staged, canary_device_id = excluded.canary_device_id, updated_at = excluded.updated_at`,
-      )
-        .bind(ctx.owner_id, repo.id, a.platform, paused, staged, canary ?? cur?.canary_device_id ?? null, Date.now())
-        .run();
-      return { ok: true, repo: repo.full_name, platform: a.platform, paused: paused === 1, staged: staged === 1 };
+      const now = Date.now();
+      const stmts = [
+        ctx.env.DB.prepare(
+          `INSERT INTO dist_settings (owner_id, repo_id, platform, paused, staged, canary_device_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (repo_id, platform) DO UPDATE SET paused = excluded.paused, staged = excluded.staged, canary_device_id = excluded.canary_device_id, updated_at = excluded.updated_at`,
+        ).bind(ctx.owner_id, repo.id, platform, paused, staged, canary, now),
+      ];
+      if (newTargets !== undefined) {
+        stmts.push(ctx.env.DB.prepare("DELETE FROM dist_targets WHERE repo_id = ? AND platform = ?").bind(repo.id, platform));
+        for (const t of newTargets) stmts.push(ctx.env.DB.prepare("INSERT INTO dist_targets (owner_id, repo_id, platform, device_id, created_at) VALUES (?, ?, ?, ?, ?)").bind(ctx.owner_id, repo.id, platform, t.id, now));
+        stmts.push(operationStatement(ctx.env, { owner_id: ctx.owner_id, repo_id: repo.id, kind: "release", stage: "targets", status: "ok", detail: { platform, devices: newTargets.map((x) => x.name) } }, now));
+      }
+      await ctx.env.DB.batch(stmts);
+      const targets = newTargets !== undefined ? newTargets : undefined;
+      return {
+        ok: true,
+        repo: repo.full_name,
+        platform,
+        paused: paused === 1,
+        staged: staged === 1,
+        ...(targets !== undefined ? { devices: targets.map((x) => x.name), note: targets.length ? `${platform} は指定した ${targets.length} 台だけに配ります` : `配布先の指定を解除しました（${platform} の登録端末すべてに配ります）` } : {}),
+      };
     },
   },
   {
     name: "list_devices",
     title: "端末の一覧",
-    description: "登録した端末（OS・最後の照合）",
+    description: "登録した端末（id・名前・OS・最後の照合・端末の鍵の指紋）。set_distribution の devices には、この名前（同じ名前が複数あるときは id）を渡す",
     inputSchema: { type: "object", properties: {} },
     annotations: { readOnlyHint: true },
     async run(ctx) {
-      const r = await ctx.env.DB.prepare("SELECT name, os, created_at, last_seen_at FROM devices WHERE owner_id = ? ORDER BY name").bind(ctx.owner_id).all();
-      return { ok: true, devices: r.results };
+      const r = await ctx.env.DB.prepare("SELECT id, name, os, created_at, last_seen_at, pub FROM devices WHERE owner_id = ? ORDER BY name, created_at").bind(ctx.owner_id).all<{ pub: string | null } & Record<string, unknown>>();
+      // 端末の鍵は公開鍵なので出してよいが、長いので SHA-256 の先頭 16 字（指紋）で見せる。鍵を登録していない端末は null
+      const devices = await Promise.all(r.results.map(async ({ pub, ...d }) => ({ ...d, device_key: pub ? (await sha256Hex(pub)).slice(0, 16) : null })));
+      return { ok: true, devices };
     },
   },
   {

@@ -1,0 +1,6 @@
+{
+  "$comment": "LOVE connect HUB 本体を取り込む決まり（Rhetoric Studio の tools/lch-rollout.mjs が読む。N.S Connection と同じ方式）。build・test はこのリポジトリの根で zsh が動かす。$LCH_HUB_DIR に本体の写しの場所が入る",
+  "file": "hub/src/vendor/love-connect-hub.mjs",
+  "build": "zsh tools/build-love-connect-hub.sh \"$LCH_HUB_DIR\"",
+  "test": "cd hub && npm ci --no-audit --no-fund && npx tsc --noEmit && npm test"
+}

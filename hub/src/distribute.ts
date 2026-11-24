@@ -5,10 +5,13 @@
  * - 通知サービス（FCM・APNs）は使わない。端末が起動時・復帰時・定期的に照合する（費用 0 円）
  * - 照合には Ed25519 で署名したマニフェストを返し、端末は署名と SHA-256 を確かめてから導入する
  * - 同じ版が 2 台以上で失敗したら、その版の配布を自動で止める
+ * - 配布先の端末を指定できる（dist_targets）。リポジトリ × OS に 1 行でもあれば、その端末だけに配る。無ければ、その OS の登録端末すべて
  */
 import { b64url, fromB64url, hmacSha256, normalizeCode, randomCode, randomToken, sha256Hex, timingSafeEqual } from "./crypto";
 import type { Env, JobRow, JobSpec, RepoRow, RunRow } from "./env";
 import { bearer, HttpError, int, json, readJson, str } from "./http";
+// LOVE connect HUB 本体（hub/src/vendor）の部品。端末の鍵の署名の確認と、登録の文面（規格 第21章）に使う
+import { pairingMessage, verifyDeviceSignature } from "./vendor/love-connect-hub.mjs";
 import { parseRevoked, parseSigningKeys, publicKeys, signManifest } from "./manifest";
 import { operationStatement, recordOperation } from "./operations";
 
@@ -129,40 +132,71 @@ async function authDevice(req: Request, env: Env): Promise<DeviceRow> {
   return d;
 }
 
-/** POST /v1/devices/register：一回限りのコードで端末トークンを発行する（Hub はハッシュだけを保存） */
+/** POST /v1/devices/register：一回限りのコードで端末トークンを発行する（Hub はハッシュだけを保存）。
+ *  任意で端末の鍵（pub・sig。LOVE connect HUB 規格 第21章の登録の文面への署名）を添えられる。添えたら署名を確かめ、合わなければ登録しない */
 async function handleRegister(req: Request, env: Env): Promise<Response> {
   const b = await readJson(req);
   const code = normalizeCode(str(b.code, "code", { max: 64 }));
   const name = str(b.name, "name", { max: 100 });
   const os = str(b.os, "os", { max: 16 });
   if (!(PLATFORMS as readonly string[]).includes(os)) throw new HttpError(400, "unsupported_os", "os は android・ios・macos・linux のどれかです");
+  const pub = str(b.pub, "pub", { max: 100, optional: true }) || null;
   const now = Date.now();
+  const codeHash = await sha256Hex("device." + code);
+  if (pub) {
+    const sig = str(b.sig, "sig", { max: 100, optional: true });
+    const row = await env.DB.prepare("SELECT owner_id FROM device_registration_codes WHERE code_hash = ? AND used_at IS NULL AND expires_at > ?").bind(codeHash, now).first<{ owner_id: string }>();
+    if (!row) throw new HttpError(400, "invalid_code", "登録コードが無効か、期限切れか、使用済みです");
+    // 署名する文は規格 第21章の登録の文面。会社 ID は持ち主、送り手 ID は端末名、使い道は device、合言葉は正規化した登録コードの SHA-256
+    const msg = pairingMessage({ co: row.owner_id, by: name, use: "device", pub, codeHash: await sha256Hex(code) });
+    if (!sig || !(await verifyDeviceSignature(pub, sig, msg))) throw new HttpError(401, "PAIR_BAD_PROOF", "端末の鍵の署名が合いません（鍵を持っている証明ができません）");
+  }
   const id = crypto.randomUUID();
   const token = randomToken(DEVICE_TOKEN_PREFIX);
-  const codeHash = await sha256Hex("device." + code);
   const r = await env.DB.batch([
     env.DB.prepare("UPDATE device_registration_codes SET used_at = ?, device_id = ? WHERE code_hash = ? AND used_at IS NULL AND expires_at > ?").bind(now, id, codeHash, now),
     env.DB.prepare(
-      `INSERT INTO devices (id, owner_id, name, os, token_hash, created_at, last_seen_at) SELECT ?, owner_id, ?, ?, ?, ?, ? FROM device_registration_codes WHERE code_hash = ? AND device_id = ?`,
-    ).bind(id, name, os, await sha256Hex(token), now, now, codeHash, id),
+      `INSERT INTO devices (id, owner_id, name, os, token_hash, created_at, last_seen_at, pub) SELECT ?, owner_id, ?, ?, ?, ?, ?, ? FROM device_registration_codes WHERE code_hash = ? AND device_id = ?`,
+    ).bind(id, name, os, await sha256Hex(token), now, now, pub, codeHash, id),
   ]);
   if ((r[1]?.meta.changes ?? 0) !== 1) throw new HttpError(400, "invalid_code", "登録コードが無効か、期限切れか、使用済みです");
   const owner = (await env.DB.prepare("SELECT owner_id FROM devices WHERE id = ?").bind(id).first<{ owner_id: string }>())!.owner_id;
-  await recordOperation(env, { owner_id: owner, kind: "device", stage: "register", status: "ok", detail: { device_id: id, name, os } });
+  await recordOperation(env, { owner_id: owner, kind: "device", stage: "register", status: "ok", detail: { device_id: id, name, os, device_key: pub !== null } });
   return json({ device_id: id, token }, 201);
 }
 
-/** GET /v1/devices/apps：この端末の OS に配る版のあるリポジトリ（app_id はリポジトリの ID） */
+/** GET /v1/devices/apps：この端末の OS に配る版のあるリポジトリ（app_id はリポジトリの ID）。配布先の指定があるリポジトリは、指定された端末にだけ出す */
 async function handleApps(req: Request, env: Env): Promise<Response> {
   const d = await authDevice(req, env);
   const r = await env.DB.prepare(
     `SELECT r.id AS app_id, r.full_name AS name, MAX(x.seq) AS ready_seq FROM releases x JOIN repos r ON r.id = x.repo_id
-     WHERE x.owner_id = ? AND x.platform = ? AND x.status = 'ready' GROUP BY r.id ORDER BY r.full_name`,
+     WHERE x.owner_id = ? AND x.platform = ? AND x.status = 'ready'
+       AND (NOT EXISTS (SELECT 1 FROM dist_targets t WHERE t.repo_id = x.repo_id AND t.platform = x.platform)
+            OR EXISTS (SELECT 1 FROM dist_targets t JOIN devices dv ON dv.id = t.device_id WHERE t.repo_id = x.repo_id AND t.platform = x.platform AND t.device_id = ?))
+     GROUP BY r.id ORDER BY r.full_name`,
   )
-    .bind(d.owner_id, d.os)
+    .bind(d.owner_id, d.os, d.id)
     .all();
   return json({ device_id: d.id, os: d.os, apps: r.results });
 }
+
+/**
+ * 配布先の端末の指定。null は指定なし（その OS の登録端末すべて）。
+ * 配列は、指定された端末のうち実在するものの ID（登録順）。指定があるのに実在する端末が無いときは空配列（誰にも配らない。全台には戻さない）
+ */
+export async function targetsOf(env: Env, repoId: string, platform: string): Promise<string[] | null> {
+  const r = await env.DB.prepare(
+    `SELECT t.device_id AS tid, d.id AS live FROM dist_targets t LEFT JOIN devices d ON d.id = t.device_id
+     WHERE t.repo_id = ? AND t.platform = ? ORDER BY d.created_at, d.id`,
+  )
+    .bind(repoId, platform)
+    .all<{ tid: string; live: string | null }>();
+  if (r.results.length === 0) return null;
+  return r.results.filter((x) => x.live !== null).map((x) => x.tid);
+}
+
+/** 配布先に入っているか（指定なしなら、どの端末も入っている） */
+export const isTargeted = (targets: string[] | null, deviceId: string): boolean => targets === null || targets.includes(deviceId);
 
 async function settingsOf(env: Env, repoId: string, platform: string): Promise<DistSettings> {
   return (
@@ -175,14 +209,14 @@ async function settingsOf(env: Env, repoId: string, platform: string): Promise<D
   );
 }
 
-/** 段階配信：この版をまだ誰も入れ終えていなければ、先行する 1 台にだけ配る */
-async function allowedByStage(env: Env, s: DistSettings, d: DeviceRow, rel: ReleaseRow): Promise<boolean> {
+/** 段階配信：この版をまだ誰も入れ終えていなければ、先行する 1 台にだけ配る。配布先の指定があれば、先行する端末はその中から選ぶ */
+async function allowedByStage(env: Env, s: DistSettings, d: DeviceRow, rel: ReleaseRow, targets: string[] | null): Promise<boolean> {
   if (!s.staged) return true;
   const ok = await env.DB.prepare("SELECT 1 FROM installs WHERE repo_id = ? AND platform = ? AND seq = ? AND status = 'installed' LIMIT 1").bind(rel.repo_id, rel.platform, rel.seq).first();
   if (ok) return true;
-  const canary =
-    s.canary_device_id ??
-    (await env.DB.prepare("SELECT id FROM devices WHERE owner_id = ? AND os = ? ORDER BY created_at, id LIMIT 1").bind(d.owner_id, d.os).first<{ id: string }>())?.id;
+  // 指定した先行の端末が配布先から外れているときは、無いものとして、配布先の中で最初に登録した端末にする
+  const explicit = s.canary_device_id && isTargeted(targets, s.canary_device_id) ? s.canary_device_id : null;
+  const canary = explicit ?? (targets !== null ? targets[0] : (await env.DB.prepare("SELECT id FROM devices WHERE owner_id = ? AND os = ? ORDER BY created_at, id LIMIT 1").bind(d.owner_id, d.os).first<{ id: string }>())?.id);
   return canary === d.id;
 }
 
@@ -195,6 +229,9 @@ async function handleCheck(req: Request, env: Env, origin: string): Promise<Resp
   const repo = await env.DB.prepare("SELECT id FROM repos WHERE id = ? AND owner_id = ?").bind(repoId, d.owner_id).first();
   if (!repo) throw new HttpError(404, "app_not_found");
   const s = await settingsOf(env, repoId, d.os);
+  const targets = await targetsOf(env, repoId, d.os);
+  // 配布先に入っていない端末には、版の有無も巻き戻しも知らせない（200 で「更新なし」）
+  if (!isTargeted(targets, d.id)) return json({ update: false, latest_seq: current, targeted: false });
   const latest = await env.DB.prepare("SELECT MAX(seq) AS seq FROM releases WHERE repo_id = ? AND platform = ? AND status = 'ready'").bind(repoId, d.os).first<{ seq: number | null }>();
   if (s.paused) return json({ update: false, latest_seq: latest?.seq ?? 0, paused: true });
 
@@ -207,7 +244,7 @@ async function handleCheck(req: Request, env: Env, origin: string): Promise<Resp
     rel = await env.DB.prepare("SELECT * FROM releases WHERE repo_id = ? AND platform = ? AND status = 'ready' ORDER BY seq DESC LIMIT 1").bind(repoId, d.os).first<ReleaseRow>();
   }
   if (!rel || (rel.seq <= current && !rollback)) return json({ update: false, latest_seq: latest?.seq ?? 0 });
-  if (!(await allowedByStage(env, s, d, rel))) return json({ update: false, latest_seq: latest?.seq ?? 0, staged: true });
+  if (!(await allowedByStage(env, s, d, rel, targets))) return json({ update: false, latest_seq: latest?.seq ?? 0, staged: true });
   if (!env.MANIFEST_SIGNING_KEYS || !env.SECRETS_KEY) throw new HttpError(503, "signing_not_configured");
 
   const now = Date.now();
@@ -258,12 +295,21 @@ async function handleReport(req: Request, env: Env): Promise<Response> {
     operationStatement(env, { owner_id: d.owner_id, repo_id: repoId, kind: "install", stage: str(b.stage, "stage", { max: 64, optional: true }) || status, status: status === "failed" || status === "rolled_back" ? "failed" : "ok", reason: message, detail: { device: d.name, seq, status } }, now),
   ]);
   if (status === "failed" || status === "rolled_back") {
-    // 失敗の連鎖を止める：同じ版が HALT_AFTER_FAILURES 台以上で失敗したら、その版の配布を止める
-    const devices = await env.DB.prepare("SELECT COUNT(*) AS n FROM installs WHERE repo_id = ? AND platform = ? AND seq = ? AND status IN ('failed', 'rolled_back')").bind(repoId, d.os, seq).first<{ n: number }>();
-    if ((devices?.n ?? 0) >= HALT_AFTER_FAILURES) {
-      const r = await env.DB.prepare("UPDATE releases SET status = 'halted', updated_at = ? WHERE repo_id = ? AND platform = ? AND seq = ? AND status = 'ready'").bind(now, repoId, d.os, seq).run();
-      if ((r.meta.changes ?? 0) > 0) {
-        await recordOperation(env, { owner_id: d.owner_id, repo_id: repoId, kind: "release", stage: "halted", status: "failed", reason: `版 ${seq}（${d.os}）が ${devices?.n} 台で失敗したため、配布を止めました`, needs_human: true, detail: { platform: d.os, seq } });
+    // 失敗の連鎖を止める：同じ版が HALT_AFTER_FAILURES 台以上で失敗したら、その版の配布を止める。
+    // 配布先の指定があるときは、配布先の端末の失敗だけを数え、配布先が少ないときは配布先の台数（1 台なら 1 台）で止める。配布先でない端末の報告は記録だけで、数えない
+    const targets = await targetsOf(env, repoId, d.os);
+    if (isTargeted(targets, d.id)) {
+      const limit = targets === null ? HALT_AFTER_FAILURES : Math.min(HALT_AFTER_FAILURES, targets.length);
+      const scope = targets === null ? "" : " AND device_id IN (SELECT device_id FROM dist_targets WHERE repo_id = ? AND platform = ?)";
+      const binds: unknown[] = [repoId, d.os, seq, ...(targets === null ? [] : [repoId, d.os])];
+      const devices = await env.DB.prepare(`SELECT COUNT(*) AS n FROM installs WHERE repo_id = ? AND platform = ? AND seq = ? AND status IN ('failed', 'rolled_back')${scope}`)
+        .bind(...binds)
+        .first<{ n: number }>();
+      if ((devices?.n ?? 0) >= limit) {
+        const r = await env.DB.prepare("UPDATE releases SET status = 'halted', updated_at = ? WHERE repo_id = ? AND platform = ? AND seq = ? AND status = 'ready'").bind(now, repoId, d.os, seq).run();
+        if ((r.meta.changes ?? 0) > 0) {
+          await recordOperation(env, { owner_id: d.owner_id, repo_id: repoId, kind: "release", stage: "halted", status: "failed", reason: `版 ${seq}（${d.os}）が ${devices?.n} 台で失敗したため、配布を止めました`, needs_human: true, detail: { platform: d.os, seq } });
+        }
       }
     }
   }
