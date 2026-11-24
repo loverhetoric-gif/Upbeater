@@ -3,6 +3,7 @@
  */
 import { dispatchCloudRunners } from "./cloud";
 import { flushChecks } from "./checks";
+import { runHubOut } from "./hubout";
 import { coordinatorCall } from "./coordinator";
 import type { Env, JobRow, JobSpec, RepoRow } from "./env";
 import { createGitHubClient, parseRepo, type GitHubClient } from "./github";
@@ -164,6 +165,8 @@ export async function runCron(env: Env, now = Date.now()): Promise<void> {
     ["reconcile", () => (env.RECONCILE_GITHUB === "1" ? reconcile(env, { now }) : Promise.resolve(0))],
     ["cloud", () => (env.HUB_URL ? dispatchCloudRunners(env, env.HUB_URL, now) : Promise.resolve(0))],
     ["checks", () => flushChecks(env, { now })],
+    // 失敗した実行を LOVE connect HUB（WORLD ruler.）へ知らせる（鍵と送り先がそろっている時だけ。hubout.ts）
+    ["hub-out", () => runHubOut(env, now)],
     [
       "cleanup",
       () =>
