@@ -1,4 +1,5 @@
 /** POST /webhook/github：push・pull_request・delete を受ける */
+import { onPullRequestEvent, type PullEventPayload } from "../automerge";
 import { coordinatorCall, type EventOutcome } from "../coordinator";
 import { createGitHubClient, parseRepo, type GitHubClient } from "../github";
 import { verifyGitHubSignature } from "../crypto";
@@ -15,11 +16,12 @@ interface Payload {
   after?: string;
   deleted?: boolean;
   action?: string;
+  number?: number;
   sender?: { login?: string; type?: string };
   pusher?: { name?: string };
   repository?: { full_name?: string };
   commits?: { added?: string[]; modified?: string[]; removed?: string[] }[];
-  pull_request?: { number?: number; head?: { sha?: string; ref?: string; repo?: { full_name?: string } | null }; base?: { ref?: string; repo?: { full_name?: string } } };
+  pull_request?: { number?: number; merged?: boolean; draft?: boolean; head?: { sha?: string; ref?: string; repo?: { full_name?: string } | null }; base?: { ref?: string; repo?: { full_name?: string } } };
 }
 
 /** Webhook の中身を合図にする。扱わないものは null */
@@ -102,6 +104,21 @@ export async function handleGitHubWebhook(req: Request, env: Env): Promise<Respo
     .bind(delivery, event, Date.now())
     .run();
   if ((ins.meta.changes ?? 0) === 0) return json({ ok: true, duplicate: true });
+
+  // 自動マージの予約への反映（新しいコミット・クローズ・準備完了）。run の作成の合図とは別に、Upbeater 自身の書き込みでも反映する
+  if (event === "pull_request") {
+    const regs = (await env.DB.prepare("SELECT id FROM repos WHERE full_name = ?").bind((payload.repository?.full_name ?? "").toLowerCase()).all<{ id: string }>()).results;
+    if (regs.length > 0) {
+      const gh = createGitHubClient(env);
+      for (const r of regs) {
+        try {
+          await onPullRequestEvent(env, gh, r.id, payload as PullEventPayload);
+        } catch {
+          console.error("自動マージの予約への反映に失敗");
+        }
+      }
+    }
+  }
 
   const ev = toEvent(event, payload);
   if (!ev) return json({ ok: true, ignored: "event" }, 202);

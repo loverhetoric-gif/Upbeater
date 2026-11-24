@@ -101,7 +101,7 @@ Hub に MCP サーバー（`/mcp`）を持たせ、claude.ai のコネクタと�
 - 移行：`migrate_workflows`（Actions の定義を変換して PR を作る）
 - 配布：`push_update`・`rollback`・`get_install_status`
 - 秘密情報：`list_secrets`（名前のみ）
-- GitHub 操作：`create_branch`・`commit_files`・`open_pr`・`merge_pr`
+- GitHub 操作：`create_branch`・`commit_files`・`open_pr`・`merge_pr`・`cancel_auto_merge`・`set_auto_merge`（無効にするだけ）
 
 ### MCP の実装（開発順序4）
 
@@ -112,6 +112,17 @@ Hub に MCP サーバー（`/mcp`）を持たせ、claude.ai のコネクタと�
 ## GitHub 操作の内製化
 
 claude.ai の GitHub コネクタでは、PR 作成時の確認画面が読み込めず作業が止まる事象が起きた。Upbeater は自前の GitHub App で、ブランチ作成 → コミット → PR → マージを一続きで実行する。失敗しても止まらず、段階・理由・再試行の可否を返す。操作できるリポジトリは Hub に登録したものに限定し、main への直接書き込みは禁止する。
+
+## 検査通過後の自動マージ
+
+AI のセッションが `merge_pr` を呼ぶと、利用者側の自動の安全判定で止められる。利用者の設定（許可リスト）を変えさせる作りは採らない。代わりに「マージを AI が行う」のをやめ、「持ち主が事前に有効にした規則に従って、Upbeater 自身がマージする」（GitHub の auto-merge と同じ考え方）。
+
+- **設定（リポジトリごと）**：`repos.auto_merge_enabled`（既定 0）と `auto_merge_method`（既定 squash）。**有効にできるのは持ち主だけ**：管理 API `PUT /v1/admin/auto-merge`（`ADMIN_TOKEN` が要る。AI は持たない）。MCP の `set_auto_merge` は**無効にする**ことだけができる（安全な向き）。`list_repos` で状態が見える
+- **予約**：`open_pr`・`ship_change` の `auto_merge: true`（`ship_change` では即時のマージの代わりに予約する）。設定が無効なら予約の時点で `auto_merge_disabled`（needs_human）で断る。予約は `auto_merges`（リポジトリ × PR 番号で 1 件）に残る。状態は waiting（待機）・merging（マージ中）・merged・cancelled・closed・stopped（人の判断待ち）
+- **マージの条件**（すべて満たした時だけ）：設定が有効／PR が下書きでない／予約したコミット（head）に対する Upbeater の run（`runs.sha`・種類を問わない）が 1 件以上あり、すべて完了して success（`definition_error`・cancelled は失敗。run が 10 分たっても 1 件も無ければ needs_human）／衝突が無い（behind・dirty は main を 1 回取り込む。取り込みで head が変わるので**新しい head の検査を待ち直す**。取り込めない衝突は stopped にして needs_human で残す）／ブランチ保護・必須の検査を満たす。マージには**検査済みの SHA** を渡す（検査していないコミットをマージしない）
+- **起きた時に評価する（定期の問い合わせはしない）**：run の完了（`flushChecks` の後）／Webhook の pull_request（synchronize＝新しい head：検査を待ち直す、closed＝取り消し・マージ済みの記録、ready_for_review）／Cron（5 分ごと。DB の run がすべて成功している予約だけ GitHub を読む。判定待ち・保留中の検査は間隔を広げ、12 回で stopped にして needs_human）。7 日たった予約は期限切れで閉じる
+- **失敗・取り消し**：検査が失敗なら予約は残して理由を needs_human で 1 度だけ記録し、再実行の成功か新しいコミットで評価し直す。PR が閉じられたら closed。取り消しは `cancel_auto_merge`。二重のマージは、waiting → merging の条件つき更新で防ぐ
+- **記録**：すべての段階を operations の kind `auto_merge`（reserved・waiting・head_changed・merged・stopped・cancelled・closed）に残し、`get_request` に予約の現在の状態と履歴を出す。既存の `merge_pr`・`open_pr`・`ship_change` の動作は、`auto_merge` を指定しない限り変えない
 
 ## 構成
 

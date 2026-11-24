@@ -1,6 +1,7 @@
 /**
  * 管理 API（暫定。開発順序4で MCP から呼ぶ）
  * - POST /v1/admin/repos                      リポジトリの登録
+ * - PUT  /v1/admin/auto-merge                 検査通過後の自動マージの有効・無効とマージの方法（有効にできるのは持ち主＝管理トークンの持ち主だけ）
  * - PUT  /v1/admin/secrets                    秘密情報の登録（値は返さない）／GET で名前の一覧
  * - POST /v1/admin/runner-codes               Runner の一回限りの登録コード
  * - POST /v1/admin/runs                       手動実行
@@ -15,6 +16,7 @@ import { randomCode, randomToken, sha256Hex, timingSafeEqual } from "../crypto";
 import type { Env, JobRow, RepoRow, RunRow } from "../env";
 import { bearer, HttpError, int, json, readJson, str } from "../http";
 import { createDeviceCode } from "../distribute";
+import { recordOperation } from "../operations";
 import { putSecret } from "../secrets";
 import { createSecretForm } from "./secret-form";
 import { assembleLogs } from "./runner";
@@ -50,6 +52,16 @@ export async function handleAdmin(req: Request, env: Env, p: string): Promise<Re
       throw e;
     }
     return json({ id }, 201);
+  }
+  if (p === "/v1/admin/auto-merge" && m === "PUT") {
+    const b = await readJson(req);
+    const owner = str(b.owner_id, "owner_id", { pattern: ID });
+    const repo = await repoOf(env, owner, str(b.repo, "repo", { pattern: REPO }));
+    if (typeof b.enabled !== "boolean") throw new HttpError(400, "invalid_enabled", "enabled は true か false です");
+    const method = b.method === undefined ? repo.auto_merge_method : str(b.method, "method", { pattern: /^(squash|merge|rebase)$/ });
+    await env.DB.prepare("UPDATE repos SET auto_merge_enabled = ?, auto_merge_method = ? WHERE id = ?").bind(b.enabled ? 1 : 0, method, repo.id).run();
+    await recordOperation(env, { owner_id: owner, repo_id: repo.id, kind: "auto_merge", stage: b.enabled ? "setting_enabled" : "setting_disabled", status: "ok", reason: `持ち主が自動マージを${b.enabled ? "有効" : "無効"}にしました（方法：${method}）`, detail: { enabled: b.enabled, method } });
+    return json({ repo: repo.full_name, enabled: b.enabled, method });
   }
   if (p === "/v1/admin/secrets" && m === "PUT") {
     const b = await readJson(req);
