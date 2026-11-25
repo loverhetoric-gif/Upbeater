@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../app_service.dart';
+import '../console_service.dart';
 import '../core/state.dart';
+import 'console_home.dart';
 import 'theme.dart';
 
 String _time(int? ms) {
@@ -12,8 +14,11 @@ String _time(int? ms) {
 }
 
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key, required this.service});
+  const HomeScreen({super.key, required this.service, this.consoleService});
   final AppService service;
+
+  /// 管理画面（任意。渡された時だけヘッダーから開ける）
+  final ConsoleService? consoleService;
 
   @override
   Widget build(BuildContext context) {
@@ -41,7 +46,7 @@ class HomeScreen extends StatelessWidget {
                       child: Center(
                         child: ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 1160),
-                          child: _Header(service: service),
+                          child: _Header(service: service, consoleService: consoleService),
                         ),
                       ),
                     ),
@@ -81,8 +86,9 @@ class HomeScreen extends StatelessWidget {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.service});
+  const _Header({required this.service, this.consoleService});
   final AppService service;
+  final ConsoleService? consoleService;
 
   @override
   Widget build(BuildContext context) {
@@ -104,10 +110,24 @@ class _Header extends StatelessWidget {
       const SizedBox(width: 8),
       Switch(value: s.wifiOnly, onChanged: service.setWifiOnly),
     ]);
+    final console = consoleService == null
+        ? null
+        : TextButton.icon(
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ConsoleLockGate(service: consoleService!))),
+            icon: const Icon(Icons.admin_panel_settings_outlined),
+            label: const Text('管理'),
+          );
     if (narrow) {
-      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [title, const SizedBox(height: 16), button, const SizedBox(height: 8), Align(alignment: Alignment.centerLeft, child: wifi)]);
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        title,
+        const SizedBox(height: 16),
+        button,
+        const SizedBox(height: 8),
+        Align(alignment: Alignment.centerLeft, child: wifi),
+        if (console != null) Align(alignment: Alignment.centerLeft, child: console),
+      ]);
     }
-    return Row(children: [Expanded(child: title), wifi, const SizedBox(width: 16), button]);
+    return Row(children: [Expanded(child: title), wifi, const SizedBox(width: 16), button, if (console != null) ...[const SizedBox(width: 8), console]]);
   }
 }
 
