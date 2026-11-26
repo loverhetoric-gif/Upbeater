@@ -77,6 +77,13 @@ class RunItem {
 
   bool get isActive => status == 'running' || status == 'queued';
   bool get isFailure => conclusion == 'failure' || conclusion == 'definition_error';
+
+  /// 開始から最終更新までの時間（完了していれば所要時間）
+  Duration? get duration {
+    if (createdAt == null || updatedAt == null) return null;
+    final d = updatedAt!.difference(createdAt!);
+    return d.isNegative ? null : d;
+  }
 }
 
 /// get_run の手順
@@ -84,10 +91,20 @@ class StepItem {
   StepItem.fromJson(Map<String, dynamic> j)
       : name = _s(j['name']),
         status = _s(j['status']),
-        exitCode = j['exit_code'] is num ? (j['exit_code'] as num).toInt() : null;
+        exitCode = j['exit_code'] is num ? (j['exit_code'] as num).toInt() : null,
+        startedAt = timeOf(j['started_at']),
+        finishedAt = timeOf(j['finished_at']);
   final String name;
   final String status;
   final int? exitCode;
+  final DateTime? startedAt;
+  final DateTime? finishedAt;
+
+  Duration? get duration {
+    if (startedAt == null || finishedAt == null) return null;
+    final d = finishedAt!.difference(startedAt!);
+    return d.isNegative ? null : d;
+  }
 }
 
 /// get_run のジョブ
@@ -99,6 +116,8 @@ class JobItem {
         reason = j['reason'] as String?,
         attempt = _n(j['attempt']),
         runner = j['runner'] as String?,
+        claimedAt = timeOf(j['claimed_at']),
+        finishedAt = timeOf(j['finished_at']),
         steps = _list(j['steps'], StepItem.fromJson);
   final String jobId;
   final String name;
@@ -106,7 +125,15 @@ class JobItem {
   final String? reason;
   final int attempt;
   final String? runner;
+  final DateTime? claimedAt;
+  final DateTime? finishedAt;
   final List<StepItem> steps;
+
+  Duration? get duration {
+    if (claimedAt == null || finishedAt == null) return null;
+    final d = finishedAt!.difference(claimedAt!);
+    return d.isNegative ? null : d;
+  }
 }
 
 /// get_run の全体
@@ -214,18 +241,28 @@ class OperationItem {
   OperationItem.fromJson(Map<String, dynamic> j)
       : id = _n(j['id']),
         repo = j['repo'] as String?,
+        runId = j['run_id'] as String?,
+        jobId = j['job_id'] as String?,
         kind = _s(j['kind']),
         stage = _s(j['stage']),
         status = _s(j['status']),
         reason = j['reason'] as String?,
+        retryable = j['retryable'] == true,
         needsHuman = j['needs_human'] == true,
+        detail = j['detail'] is Map<String, dynamic> ? j['detail'] as Map<String, dynamic> : const {},
         createdAt = timeOf(j['created_at']);
   final int id;
   final String? repo;
+  final String? runId;
+  final String? jobId;
   final String kind;
   final String stage;
   final String status;
   final String? reason;
+  final bool retryable;
   final bool needsHuman;
+
+  /// 詳細（ワークフロー名・版・ビルド番号など。Hub が JSON で持つ）
+  final Map<String, dynamic> detail;
   final DateTime? createdAt;
 }

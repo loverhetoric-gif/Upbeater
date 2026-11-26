@@ -70,5 +70,17 @@
 	</array>
 	<key>NSFaceIDUsageDescription</key>
 	<string>管理画面を開く本人確認に Face ID を使います</string>
+	<!-- 完了通知のバックグラウンド確認（BGAppRefresh）用。
+	     タスク ID は Dart 側の consoleRefreshTaskId と AppDelegate の登録と一致させること。
+	     実行間隔は OS が制御するため保証されない -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>processing</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.upbeater.console.refresh</string>
+	</array>
 </dict>
 </plist>
