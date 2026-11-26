@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../app_service.dart';
 import '../console_service.dart';
 import '../core/state.dart';
+import '../notification_service.dart';
 import 'console_home.dart';
 import 'theme.dart';
 
@@ -14,11 +15,14 @@ String _time(int? ms) {
 }
 
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key, required this.service, this.consoleService});
+  const HomeScreen({super.key, required this.service, this.consoleService, this.consoleNotifier});
   final AppService service;
 
   /// 管理画面（任意。渡された時だけヘッダーから開ける）
   final ConsoleService? consoleService;
+
+  /// 管理画面の完了通知の確認役（任意）
+  final ConsoleNotifier? consoleNotifier;
 
   @override
   Widget build(BuildContext context) {
@@ -46,7 +50,7 @@ class HomeScreen extends StatelessWidget {
                       child: Center(
                         child: ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 1160),
-                          child: _Header(service: service, consoleService: consoleService),
+                          child: _Header(service: service, consoleService: consoleService, consoleNotifier: consoleNotifier),
                         ),
                       ),
                     ),
@@ -86,9 +90,10 @@ class HomeScreen extends StatelessWidget {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.service, this.consoleService});
+  const _Header({required this.service, this.consoleService, this.consoleNotifier});
   final AppService service;
   final ConsoleService? consoleService;
+  final ConsoleNotifier? consoleNotifier;
 
   @override
   Widget build(BuildContext context) {
@@ -113,7 +118,7 @@ class _Header extends StatelessWidget {
     final console = consoleService == null
         ? null
         : TextButton.icon(
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ConsoleLockGate(service: consoleService!))),
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ConsoleLockGate(service: consoleService!, notifier: consoleNotifier))),
             icon: const Icon(Icons.admin_panel_settings_outlined),
             label: const Text('管理'),
           );

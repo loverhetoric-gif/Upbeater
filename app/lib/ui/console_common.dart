@@ -1,6 +1,63 @@
 import 'package:flutter/material.dart';
 
+import '../core/operation_labels.dart';
+import 'app_badge.dart';
+
 /// 管理画面の共通部品。色・言い方は受け手の画面（theme.dart の StatusStyle）に揃える
+
+/// 状態チップ（色の帯＋アイコン＋ラベル）
+class StatusChip extends StatelessWidget {
+  const StatusChip({super.key, required this.label, required this.icon, required this.tone});
+  final String label;
+  final IconData icon;
+  final String tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final color = toneColor(tone, scheme);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(color: color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(999), border: Border.all(color: color.withValues(alpha: 0.45))),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 13, color: color),
+        const SizedBox(width: 4),
+        Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+      ]),
+    );
+  }
+}
+
+/// アプリ（repo）での絞り込みチップ列。「全て」＋各 repo（バッジ付き）
+class RepoFilterChips extends StatelessWidget {
+  const RepoFilterChips({super.key, required this.repos, required this.selected, required this.onSelected});
+  final List<String> repos;
+
+  /// 選択中の repo。null は「全て」
+  final String? selected;
+  final ValueChanged<String?> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    if (repos.length < 2) return const SizedBox.shrink();
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      child: Row(children: [
+        ChoiceChip(label: const Text('全て'), selected: selected == null, onSelected: (_) => onSelected(null)),
+        for (final repo in repos) ...[
+          const SizedBox(width: 8),
+          ChoiceChip(
+            avatar: AppBadge(repo: repo, size: 20),
+            label: Text(repoDisplayName(repo)),
+            selected: selected == repo,
+            onSelected: (_) => onSelected(repo),
+          ),
+        ],
+      ]),
+    );
+  }
+}
 
 /// 実行の状態・結果の表示（theme.dart の StatusStyle は受け手の導入状態用なので、こちらは別に持つ）
 class RunStatusStyle {
@@ -21,13 +78,7 @@ class RunStatusStyle {
     };
   }
 
-  Color color(ColorScheme s) => switch (tone) {
-        'ok' => const Color(0xFF1E8E5A),
-        'busy' => s.primary,
-        'warn' => const Color(0xFFB7791F),
-        'error' => s.error,
-        _ => s.outline,
-      };
+  Color color(ColorScheme s) => toneColor(tone, s);
 }
 
 /// 読み込み・失敗・未設定の表示つきで一覧画面を作るための土台
