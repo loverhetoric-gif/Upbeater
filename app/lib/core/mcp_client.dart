@@ -2,11 +2,10 @@
 ///
 /// 接続方式は hub/src/mcp.ts・hub/src/oauth.ts で確認したもの：
 /// - initialize の後に tools/call を送る（状態を持たないサーバー）
-/// - 認証は Authorization: Bearer。使えるのは2種類
-///   - 直接登録トークン `upb_m_...`（期限なし・失効可。管理 API POST /v1/admin/mcp-tokens で発行）
-///   - OAuth のアクセストークン `upb_at_...`（1時間。更新トークン30日）
-/// - アプリ内 OAuth は、Hub のリダイレクト先検証が https のみ（カスタムスキーム不可）の
-///   ため今はできない。管理画面は `upb_m_` を設定で入れる方式にする
+/// - 認証は Authorization: Bearer `upb_m_...`（期限なし・失効可）
+/// - 利用者は接続コード（一回限り・15 分）だけを入れる。コードの引き換え
+///   （POST /v1/console/redeem）で Hub が `upb_m_` を発行し、アプリはそれを
+///   安全な保管場所に置いて以降の呼び出しに使う。利用者に鍵そのものは見せない
 library;
 
 import 'dart:convert';
@@ -65,7 +64,7 @@ class McpClient {
       throw McpException('Hub に接続できませんでした（$e）');
     }
     if (res.statusCode == 401) {
-      throw McpException('トークンが無効です。管理の設定で接続用トークン（upb_m_）を確かめてください', isAuthError: true);
+      throw McpException('接続が無効になっています。「設定」タブで接続し直してください', isAuthError: true);
     }
     if (res.statusCode != 200) throw McpException('Hub がエラーを返しました（HTTP ${res.statusCode}）');
     final Object? decoded;
@@ -124,4 +123,37 @@ class McpClient {
   }
 
   void close() => _client.close();
+}
+
+/// 接続コードを引き換えて、接続に使う控え（upb_m_）を返す。
+/// 引き換えの口は認証なし（コード自体が資格）。失敗の文言は利用者にそのまま見せる
+Future<String> redeemConsoleCode({required String hubUrl, required String code, http.Client? httpClient}) async {
+  final client = httpClient ?? http.Client();
+  try {
+    final http.Response res;
+    try {
+      res = await client
+          .post(
+            Uri.parse('$hubUrl/v1/console/redeem'),
+            headers: {'content-type': 'application/json', 'accept': 'application/json'},
+            body: jsonEncode({'code': code}),
+          )
+          .timeout(const Duration(seconds: 30));
+    } catch (e) {
+      throw McpException('Hub に接続できませんでした（$e）');
+    }
+    if (res.statusCode == 400) throw McpException('接続コードが無効か、期限切れか、使用済みです');
+    if (res.statusCode != 201) throw McpException('Hub がエラーを返しました（HTTP ${res.statusCode}）');
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(utf8.decode(res.bodyBytes));
+    } catch (_) {
+      throw McpException('Hub の応答を読み取れませんでした');
+    }
+    final token = decoded is Map<String, dynamic> ? decoded['token'] : null;
+    if (token is! String || token.isEmpty) throw McpException('Hub の応答形式が想定と違います');
+    return token;
+  } finally {
+    if (httpClient == null) client.close();
+  }
 }
