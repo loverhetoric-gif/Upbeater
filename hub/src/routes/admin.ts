@@ -10,12 +10,14 @@
  * - GET  /v1/admin/jobs/:id/logs              ログ（通番の順。秘密情報は伏せる）
  * - POST /v1/admin/secret-forms               秘密情報の入力ページ（一回限り・期限なし）を発行する
  * - POST /v1/admin/mcp-tokens                 MCP の接続用トークンを発行する（同じ名前の前のトークンは取り消す）
+ * - POST /v1/admin/console-codes              管理アプリの一回限りの接続コード
  */
 import { coordinatorCall, type EventOutcome } from "../coordinator";
 import { randomCode, randomToken, sha256Hex, timingSafeEqual } from "../crypto";
 import type { Env, JobRow, RepoRow, RunRow } from "../env";
 import { bearer, HttpError, int, json, readJson, str } from "../http";
 import { createDeviceCode } from "../distribute";
+import { createConsoleCode } from "../console";
 import { recordOperation } from "../operations";
 import { putSecret } from "../secrets";
 import { createSecretForm } from "./secret-form";
@@ -81,6 +83,10 @@ export async function handleAdmin(req: Request, env: Env, p: string): Promise<Re
   if (p === "/v1/admin/device-codes" && m === "POST") {
     const b = await readJson(req);
     return json(await createDeviceCode(env, str(b.owner_id, "owner_id", { pattern: ID })), 201);
+  }
+  if (p === "/v1/admin/console-codes" && m === "POST") {
+    const b = await readJson(req);
+    return json(await createConsoleCode(env, str(b.owner_id, "owner_id", { pattern: ID })), 201);
   }
   if (p === "/v1/admin/mcp-tokens" && m === "POST") {
     const b = await readJson(req);

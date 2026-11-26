@@ -9,6 +9,7 @@ import 'package:upbeater/core/console_models.dart';
 import 'package:upbeater/core/mcp_client.dart';
 import 'package:upbeater/core/state.dart';
 import 'package:upbeater/ui/console_home.dart';
+import 'package:upbeater/ui/console_settings_screen.dart';
 import 'package:upbeater/ui/theme.dart';
 
 http.Response jsonResponse(Object? payload) =>
@@ -115,6 +116,104 @@ void main() {
     expect(find.text('要対応'), findsOneWidget);
     expect(find.text('#3 test.yml'), findsOneWidget);
     expect(find.text('失敗'), findsOneWidget);
+    expect(t.takeException(), isNull);
+  });
+
+  test('引き換え：201 で接続の控えを返し、400 はコードの文言になる', () async {
+    final ok = MockClient((req) async {
+      expect(req.url.path, '/v1/console/redeem');
+      expect((jsonDecode(req.body) as Map)['code'], 'ABCDE-FGHIJ');
+      return http.Response(jsonEncode({'token': 'upb_m_test', 'name': 'console-app'}), 201, headers: {'content-type': 'application/json'});
+    });
+    expect(await redeemConsoleCode(hubUrl: 'https://hub.example', code: 'ABCDE-FGHIJ', httpClient: ok), 'upb_m_test');
+    final bad = MockClient((_) async => http.Response(jsonEncode({'error': 'invalid_code'}), 400, headers: {'content-type': 'application/json'}));
+    await expectLater(
+      redeemConsoleCode(hubUrl: 'https://hub.example', code: 'XXXXX-XXXXX', httpClient: bad),
+      throwsA(isA<McpException>().having((e) => e.message, 'message', '接続コードが無効か、期限切れか、使用済みです')),
+    );
+  });
+
+  test('接続コード：引き換えに成功すると保存され、接続確認が走る', () async {
+    final store = MemorySecretStore();
+    final s = ConsoleService(
+      secrets: store,
+      redeemFn: (url, code) async {
+        expect(url, 'https://hub.example');
+        expect(code, 'ABCDE-FGHIJ');
+        return 'upb_m_test';
+      },
+      clientFactory: (url, token) => McpClient(hubUrl: url, token: token, httpClient: fakeHub({
+            'list_repos': {
+              'ok': true,
+              'repos': [
+                {'repo': 'o/r'},
+              ],
+            },
+          })),
+    );
+    await s.connectWithCode(hubUrl: 'https://hub.example/', code: ' ABCDE-FGHIJ ');
+    expect(s.configured, isTrue);
+    expect(s.token, 'upb_m_test');
+    // 保存されている（作り直して読み戻せる）
+    final restored = ConsoleService(secrets: store);
+    await restored.init();
+    expect(restored.token, 'upb_m_test');
+    expect(restored.hubUrl, 'https://hub.example');
+    // 接続確認（道具の呼び出し）が通る
+    expect((await s.fetchRepos()).single.fullName, 'o/r');
+  });
+
+  test('接続コード：引き換えに失敗すると何も保存されない', () async {
+    final store = MemorySecretStore();
+    final s = ConsoleService(
+      secrets: store,
+      redeemFn: (url, code) async => throw McpException('接続コードが無効か、期限切れか、使用済みです'),
+    );
+    await expectLater(s.connectWithCode(hubUrl: 'https://hub.example', code: 'XXXXX-XXXXX'), throwsA(isA<McpException>()));
+    expect(s.configured, isFalse);
+    final restored = ConsoleService(secrets: store);
+    await restored.init();
+    expect(restored.token, '');
+  });
+
+  testWidgets('設定画面：コードで接続すると接続済みになり、解除できる', (t) async {
+    final s = ConsoleService(
+      secrets: MemorySecretStore(),
+      redeemFn: (url, code) async => 'upb_m_test',
+      clientFactory: (url, token) => McpClient(hubUrl: url, token: token, httpClient: fakeHub({
+            'list_repos': {'ok': true, 'repos': []},
+          })),
+    );
+    await t.pumpWidget(MaterialApp(theme: buildTheme(Brightness.light), home: Scaffold(body: ConsoleSettingsScreen(service: s))));
+    await t.pumpAndSettle();
+    expect(find.textContaining('トークン'), findsNothing);
+    expect(find.text('接続コード'), findsOneWidget);
+    await t.enterText(find.byType(TextField).at(1), 'ABCDE-FGHIJ');
+    await t.tap(find.text('接続する'));
+    await t.pumpAndSettle();
+    expect(find.textContaining('接続できました'), findsOneWidget);
+    expect(find.textContaining('接続済み'), findsOneWidget);
+    expect(s.configured, isTrue);
+    await t.tap(find.text('接続を解除'));
+    await t.pumpAndSettle();
+    expect(find.text('接続を解除しました'), findsOneWidget);
+    expect(s.configured, isFalse);
+    expect(t.takeException(), isNull);
+  });
+
+  testWidgets('設定画面：引き換えに失敗するとエラーが出て、接続済みにならない', (t) async {
+    final s = ConsoleService(
+      secrets: MemorySecretStore(),
+      redeemFn: (url, code) async => throw McpException('接続コードが無効か、期限切れか、使用済みです'),
+    );
+    await t.pumpWidget(MaterialApp(theme: buildTheme(Brightness.light), home: Scaffold(body: ConsoleSettingsScreen(service: s))));
+    await t.pumpAndSettle();
+    await t.enterText(find.byType(TextField).at(1), 'XXXXX-XXXXX');
+    await t.tap(find.text('接続する'));
+    await t.pumpAndSettle();
+    expect(find.text('接続コードが無効か、期限切れか、使用済みです'), findsOneWidget);
+    expect(find.text('接続を解除'), findsNothing);
+    expect(s.configured, isFalse);
     expect(t.takeException(), isNull);
   });
 

@@ -45,7 +45,7 @@ class LoadView extends StatelessWidget {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(24),
-          child: Text('まだ接続設定がありません。\n「設定」タブで Hub の URL と接続用トークン（upb_m_）を入れてください。', textAlign: TextAlign.center),
+          child: Text('まだ接続設定がありません。\n「設定」タブで Hub の URL と接続コードを入れてください。', textAlign: TextAlign.center),
         ),
       );
     }

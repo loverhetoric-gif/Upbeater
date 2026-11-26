@@ -1,6 +1,7 @@
 /// 管理画面（コンソール）全体をつなぐ：接続設定の読み書き、Hub の MCP への呼び出し。
 /// 受け手の AppService とは独立で、iOS ではこちらだけが動く。
-/// トークンは端末トークンとは別キーで、同じ SecretStore（OS の安全な保管場所）に置く
+/// 接続はコード方式：利用者が入れた一回限りのコードを引き換えて得た控えを、
+/// 端末の控えとは別キーで、同じ SecretStore（OS の安全な保管場所）に置く
 library;
 
 import 'package:flutter/foundation.dart';
@@ -13,9 +14,12 @@ const _hubUrlKey = 'upbeater.console_hub_url';
 const _tokenKey = 'upbeater.console_mcp_token';
 
 class ConsoleService extends ChangeNotifier {
-  ConsoleService({required this.secrets, this.defaultHubUrl = defaultConsoleHubUrl, this.clientFactory});
+  ConsoleService({required this.secrets, this.defaultHubUrl = defaultConsoleHubUrl, this.clientFactory, this.redeemFn});
 
   final McpClient Function(String hubUrl, String token)? clientFactory;
+
+  /// 接続コードの引き換え（テストで差し替える。既定は Hub へ実際に送る）
+  final Future<String> Function(String hubUrl, String code)? redeemFn;
 
   static const defaultConsoleHubUrl = 'https://upbeater.loverhetoric.com';
 
@@ -37,8 +41,17 @@ class ConsoleService extends ChangeNotifier {
   }
 
   McpClient get client {
-    if (!configured) throw McpException('管理の設定で接続用トークン（upb_m_）を入れてください');
+    if (!configured) throw McpException('管理の設定で接続してください');
     return _client ??= (clientFactory?.call(hubUrl, token) ?? McpClient(hubUrl: hubUrl, token: token));
+  }
+
+  /// 接続コードで接続する：引き換えて得た控えを保存する。
+  /// 引き換えに失敗したら何も保存しない（呼び出し側で文言を出す）
+  Future<void> connectWithCode({required String hubUrl, required String code}) async {
+    final url = normalizeHubUrl(hubUrl);
+    final redeem = redeemFn ?? (u, c) => redeemConsoleCode(hubUrl: u, code: c);
+    final newToken = await redeem(url, code.trim());
+    await saveSettings(hubUrl: url, token: newToken);
   }
 
   Future<void> saveSettings({required String hubUrl, required String token}) async {

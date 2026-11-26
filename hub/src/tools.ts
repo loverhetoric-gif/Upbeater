@@ -12,6 +12,7 @@ import { sha256Hex } from "./crypto";
 import { assembleLogs } from "./routes/runner";
 import { createSecretForm } from "./routes/secret-form";
 import { createDeviceCode, targetsOf } from "./distribute";
+import { createConsoleCode } from "./console";
 import { convertWorkflow, type ConvertResult } from "./workflow/convert";
 
 // ───────── 入力の検証（JSON Schema の部分集合） ─────────
@@ -691,6 +692,16 @@ export const TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: {} },
     async run(ctx) {
       const c = await createDeviceCode(ctx.env, ctx.owner_id);
+      return { ok: true, code: c.code, expires_at: c.expires_at, hub_url: ctx.origin };
+    },
+  },
+  {
+    name: "create_console_code",
+    title: "管理アプリの接続コード",
+    description: "管理アプリ（コンソール）に入れる一回限りの接続コード（15 分）を発行する。利用者がアプリの接続画面で、Hub の URL とこのコードを入れる",
+    inputSchema: { type: "object", properties: {} },
+    async run(ctx) {
+      const c = await createConsoleCode(ctx.env, ctx.owner_id);
       return { ok: true, code: c.code, expires_at: c.expires_at, hub_url: ctx.origin };
     },
   },
