@@ -114,8 +114,15 @@ class ConsoleService extends ChangeNotifier {
   Future<InstallStatus> fetchInstallStatus(String repo) async =>
       InstallStatus.fromJson(await client.callTool('get_install_status', {'repo': repo}));
 
-  Future<List<OperationItem>> fetchNeedsHuman({int limit = 50}) async {
-    final r = await client.callTool('list_operations', {'needs_human_only': true, 'limit': limit});
+  /// 操作の記録（履歴タブ・通知の差分検出で使う）
+  Future<List<OperationItem>> fetchOperations({int limit = 100, bool needsHumanOnly = false, String? repo}) async {
+    final r = await client.callTool('list_operations', {
+      'limit': limit,
+      if (needsHumanOnly) 'needs_human_only': true,
+      'repo': ?repo,
+    });
     return ((r['operations'] as List?) ?? const []).whereType<Map<String, dynamic>>().map(OperationItem.fromJson).toList();
   }
+
+  Future<List<OperationItem>> fetchNeedsHuman({int limit = 50}) => fetchOperations(limit: limit, needsHumanOnly: true);
 }
