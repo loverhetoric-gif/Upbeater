@@ -220,6 +220,39 @@ export const TOOLS: Tool[] = [
     },
   },
 
+  {
+    name: "unregister_repo",
+    title: "リポジトリの登録解除",
+    description:
+      "リポジトリの登録を外し、そのリポジトリの秘密情報・入力ページ・定義の写しも消す。取り消せない。利用者の承認（WORLD ruler. の destructive）の後にだけ使う。実行の履歴・配布の記録が残っているリポジトリは消さない（理由を返す）。GitHub 側のリポジトリには何もしない",
+    inputSchema: { type: "object", properties: { repo: repoArg }, required: ["repo"] },
+    annotations: { destructiveHint: true, idempotentHint: true },
+    async run(ctx, a) {
+      const repo = await ownedRepo(ctx, a.repo as string);
+      const used = await ctx.env.DB.prepare(
+        "SELECT (SELECT COUNT(*) FROM runs WHERE repo_id = ?1) AS runs, (SELECT COUNT(*) FROM releases WHERE repo_id = ?1) AS releases, (SELECT COUNT(*) FROM installs WHERE repo_id = ?1) AS installs",
+      )
+        .bind(repo.id)
+        .first<{ runs: number; releases: number; installs: number }>();
+      if (used && (used.runs > 0 || used.releases > 0 || used.installs > 0)) {
+        throw new OpError("repo_has_history", `${repo.full_name} には実行・配布の記録が残っているため、登録を外せません（記録の削除は別の手段が要ります）`, { needsHuman: true, details: used });
+      }
+      const res = await ctx.env.DB.batch([
+        ctx.env.DB.prepare("DELETE FROM secrets WHERE owner_id = ? AND repo_id = ?").bind(ctx.owner_id, repo.id),
+        ctx.env.DB.prepare("DELETE FROM secret_forms WHERE owner_id = ? AND repo_id = ?").bind(ctx.owner_id, repo.id),
+        ctx.env.DB.prepare("DELETE FROM schedules WHERE workflow_id IN (SELECT id FROM workflows WHERE repo_id = ?)").bind(repo.id),
+        ctx.env.DB.prepare("DELETE FROM workflows WHERE repo_id = ?").bind(repo.id),
+        ctx.env.DB.prepare("DELETE FROM check_updates WHERE repo_id = ?").bind(repo.id),
+        ctx.env.DB.prepare("DELETE FROM dist_settings WHERE repo_id = ?").bind(repo.id),
+        ctx.env.DB.prepare("DELETE FROM repos WHERE id = ? AND owner_id = ?").bind(repo.id, ctx.owner_id),
+      ]);
+      const secrets = res[0]?.meta.changes ?? 0;
+      const pages = res[1]?.meta.changes ?? 0;
+      await recordOperation(ctx.env, { owner_id: ctx.owner_id, repo_id: repo.id, kind: "repo", stage: "unregister", status: "ok", detail: { repo: repo.full_name, secrets_deleted: secrets, secret_forms_deleted: pages } });
+      return { ok: true, repo: repo.full_name, secrets_deleted: secrets, secret_forms_deleted: pages };
+    },
+  },
+
   // ── 実行 ──
   {
     name: "run_workflow",
@@ -488,6 +521,23 @@ export const TOOLS: Tool[] = [
       const b = (await res.json()) as { url: string; names: string[] };
       await recordOperation(ctx.env, { owner_id: ctx.owner_id, repo_id: repoId || null, kind: "secret", stage: "form_issued", status: "ok", detail: { names: b.names } });
       return { ok: true, url: b.url, names: b.names, note: "この URL を利用者に渡し、値を入れてもらってください（一回限り）" };
+    },
+  },
+
+  {
+    name: "delete_secret",
+    title: "秘密情報の削除",
+    description: "秘密情報を 1 つ消す（repo を省くと全リポジトリ共通のもの）。取り消せない。利用者の承認（WORLD ruler. の destructive）の後にだけ使う。値は返さない",
+    inputSchema: { type: "object", properties: { repo: repoArg, name: str("消す秘密情報の名前（英大文字・数字・_）", 100) }, required: ["name"] },
+    annotations: { destructiveHint: true, idempotentHint: true },
+    async run(ctx, a) {
+      const name = a.name as string;
+      if (!SECRET_NAME.test(name)) throw new OpError("invalid_input", `名前「${name}」は使えません（英大文字・数字・_）`);
+      const repo = a.repo ? await ownedRepo(ctx, a.repo as string) : null;
+      const r = await ctx.env.DB.prepare("DELETE FROM secrets WHERE owner_id = ? AND repo_id = ? AND name = ?").bind(ctx.owner_id, repo?.id ?? "", name).run();
+      const deleted = (r.meta.changes ?? 0) > 0;
+      await recordOperation(ctx.env, { owner_id: ctx.owner_id, repo_id: repo?.id ?? null, kind: "secret", stage: "delete", status: "ok", detail: { name, deleted } });
+      return { ok: true, name, scope: repo?.full_name ?? "（全リポジトリ共通）", deleted };
     },
   },
 

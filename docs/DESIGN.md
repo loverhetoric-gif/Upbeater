@@ -109,6 +109,13 @@ Hub に MCP サーバー（`/mcp`）を持たせ、claude.ai のコネクタと�
 - 道具：`list_repos`・`register_repo`・`pause`（合図での実行を止める。手動実行は止めない。再開後は照合で最新に追いつく）・`run_workflow`・`list_runs`・`get_run`・`get_logs`・`rerun`・`cancel`・`list_runners`・`list_operations`・`migrate_workflows`（変換して PR。マージはしない）・`list_secrets`・`request_secrets`（入力ページの URL を発行。値はチャットに出さない）・`create_branch`・`commit_files`・`open_pr`・`merge_pr`・`ship_change`・`get_request`。配布の道具は開発順序6
 - 自分のコミット：MCP で依頼したコミット・PR は `requested_refs` に記録し、Upbeater 自身の書き込みでも合図にする（マージの push は、コミットに対応する PR でも確かめる）。それ以外の自分の push は合図にせず、既定ブランチなら処理済み（`last_seen_sha`）にして、定期照合が取りこぼしとして拾わないようにする
 
+### 承認後のマージの受け口と削除の手段
+
+- `POST /v1/release-merge`：外部の承認の仕組み（WORLD ruler. の release）が、利用者の承認の後にマージを依頼する受け口。認証は `/mcp` と同じ（接続用トークン `upb_m_`、または OAuth の `upb_at_`）。本体は `{repo, number, request_id}`（`request_id` は必須）。登録済みのリポジトリだけを、`mergePrOp` に `request_id` を付けて実行する。同じ `request_id` の再依頼は、完了済みなら完了済みの結果を返す（二重にマージしない）。同じ `request_id` で別の内容は拒否する。答えは `{ok:true, merged:true, note?}` か `{ok:false, merged:false, reason, code, retryable, needs_human}`（`reason` は日本語。値・トークンは出さない）。認証の失敗は 401、入力の誤りは 400、マージの失敗は 200 で `ok:false`
+- `delete_secret`（`repo` 省略で全リポジトリ共通・`name`）：秘密情報を 1 つ消す。値は返さない
+- `unregister_repo`（`repo`）：登録を外し、そのリポジトリの秘密情報・入力ページ・定義の写し・配布の設定も消す。実行の履歴・配布の記録が残っているリポジトリは消さず `repo_has_history` を返す（履歴の削除は別の手段）。GitHub 側には何もしない
+- 2 つの削除の道具は取り消せない。利用者の承認（WORLD ruler. の destructive）の後にだけ使い、道具の説明にもそう書く。どちらも `operations` に記録を残す（秘密情報の値は記録しない）
+
 ## GitHub 操作の内製化
 
 claude.ai の GitHub コネクタでは、PR 作成時の確認画面が読み込めず作業が止まる事象が起きた。Upbeater は自前の GitHub App で、ブランチ作成 → コミット → PR → マージを一続きで実行する。失敗しても止まらず、段階・理由・再試行の可否を返す。操作できるリポジトリは Hub に登録したものに限定し、main への直接書き込みは禁止する。
