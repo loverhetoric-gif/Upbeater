@@ -42,6 +42,8 @@
     "HUB_URL": "https://upbeater.loverhetoric.com",
     // LOVE connect HUB：失敗した実行の知らせの送り先（WORLD ruler. の中継の住所。秘密情報ではない）。空にすると送らない
     "HUB_WORLDRULERS_URL": "https://world-rulers.loverhetoric.com",
+    // LIFElive（開発の見張り）へ合図を渡す先。LIFElive は GitHub を読まず、ここから届く合図でアプリ一覧を新しくする
+    "LIFELIVE_EVENTS_URL": "https://lifelive-api.twilight-star-9d9d.workers.dev/github-events",
     // クラウド Runner（cloud-runner/deploy.sh が出す値。空の間は使わない）
     "GCP_PROJECT": "",
     "GCP_REGION": "",

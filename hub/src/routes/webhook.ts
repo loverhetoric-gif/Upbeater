@@ -3,6 +3,7 @@ import { onPullRequestEvent, type PullEventPayload } from "../automerge";
 import { coordinatorCall, type EventOutcome } from "../coordinator";
 import { createGitHubClient, parseRepo, type GitHubClient } from "../github";
 import { verifyGitHubSignature } from "../crypto";
+import { forwardToLifelive } from "../lifelive";
 import type { Env, RepoRow } from "../env";
 import { json } from "../http";
 import { recordOperation } from "../operations";
@@ -104,6 +105,8 @@ export async function handleGitHubWebhook(req: Request, env: Env): Promise<Respo
     .bind(delivery, event, Date.now())
     .run();
   if ((ins.meta.changes ?? 0) === 0) return json({ ok: true, duplicate: true });
+  // LIFElive にも渡す（登録していないリポジトリ・ここで扱わない PR の閉じも含めて）
+  await forwardToLifelive(env, event, delivery, raw, req.headers.get("x-hub-signature-256") ?? "");
 
   // 自動マージの予約への反映（新しいコミット・クローズ・準備完了）。run の作成の合図とは別に、Upbeater 自身の書き込みでも反映する
   if (event === "pull_request") {
