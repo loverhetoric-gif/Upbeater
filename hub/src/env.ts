@@ -31,6 +31,8 @@ export interface Env {
   GCP_API?: Fetcher;
   GCP_TOKEN_URL?: string;
   GCP_RUN_BASE?: string;
+  /** LOVE connect HUB：失敗した実行の知らせの送り先（WORLD ruler. の中継の住所。秘密情報ではない。空の間は送らない）。hubout.ts */
+  HUB_WORLDRULERS_URL?: string;
   /** マージの可否の判定を待つ間隔（ミリ秒。既定 5000。テストで短くする） */
   GITHUB_POLL_MS?: string;
 
@@ -46,6 +48,8 @@ export interface Env {
   GCP_SERVICE_ACCOUNT_KEY?: string;
   GITHUB_TOKEN?: string;
   MANIFEST_SIGNING_KEYS?: string;
+  /** LOVE connect HUB の会社ごとの署名の鍵（base64url・32 バイト以上。会社 loverhetoric。WORLD ruler. と同じ値）。無い間は知らせを送らない */
+  HUB_KEY_LOVERHETORIC?: string;
 }
 
 export interface RepoRow {
@@ -58,6 +62,9 @@ export interface RepoRow {
   last_reconciled_at: number | null;
   next_run_number: number;
   paused: number;
+  /** 検査通過後の自動マージ（持ち主だけが有効にできる。既定は 0） */
+  auto_merge_enabled: number;
+  auto_merge_method: string;
   created_at: number;
 }
 

@@ -9,6 +9,7 @@
 //   GITHUB_APP_CLIENT_SECRET MCP の OAuth（GitHub でのログイン）
 //   GCP_SERVICE_ACCOUNT_KEY クラウド Runner（Cloud Run Jobs）を起動するサービスアカウントの鍵（cloud-runner/deploy.sh が入れる）
 //   MANIFEST_SIGNING_KEYS   端末への配布のマニフェスト署名用の Ed25519 秘密鍵（開発順序6）
+//   HUB_KEY_LOVERHETORIC    LOVE connect HUB の会社ごとの署名の鍵（WORLD ruler. と同じ値。失敗した実行の知らせに署名する。hubout.ts）
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "upbeater-hub",
@@ -38,7 +39,9 @@
     // GitHub App の Client ID（秘密情報ではない。空の間は MCP のログインが使えない）
     "GITHUB_APP_CLIENT_ID": "",
     // Hub 自身の URL（クラウド Runner に渡す）
-    "HUB_URL": "https://upbeater-hub.twilight-star-9d9d.workers.dev",
+    "HUB_URL": "https://upbeater.loverhetoric.com",
+    // LOVE connect HUB：失敗した実行の知らせの送り先（WORLD ruler. の中継の住所。秘密情報ではない）。空にすると送らない
+    "HUB_WORLDRULERS_URL": "https://world-rulers.loverhetoric.com",
     // LIFElive（開発の見張り）へ合図を渡す先。LIFElive は GitHub を読まず、ここから届く合図でアプリ一覧を新しくする
     "LIFELIVE_EVENTS_URL": "https://lifelive-api.twilight-star-9d9d.workers.dev/github-events",
     // クラウド Runner（cloud-runner/deploy.sh が出す値。空の間は使わない）

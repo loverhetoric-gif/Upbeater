@@ -6,9 +6,11 @@ import { parseRevoked, parseSigningKeys, publicKeys } from "./manifest";
 import { handleAdmin } from "./routes/admin";
 import { handleBlob } from "./routes/blobs";
 import { handleClaim, handleComplete, handleHeartbeat, handleLogs, handleRegisterRunner, handleStep } from "./routes/runner";
+import { handleReleaseMerge } from "./routes/release-merge";
 import { handleSecretForm } from "./routes/secret-form";
 import { handleGitHubWebhook } from "./routes/webhook";
 import { handleDevices } from "./distribute";
+import { handleConsoleRedeem } from "./console";
 import { handleMcp } from "./mcp";
 import { authorizationServerMetadata, cors, handleAuthorize, handleConsent, handleGitHubCallback, handleRegisterClient, handleRevoke, handleToken, protectedResourceMetadata } from "./oauth";
 import { runCron } from "./scheduled";
@@ -44,7 +46,10 @@ async function route(req: Request, env: Env): Promise<Response> {
   }
   const b = /^\/v1\/runners\/jobs\/([0-9a-f-]{36})\/(artifacts|cache)\/([^/]+)$/.exec(p);
   if (b) return handleBlob(req, env, b[1]!, b[2] as "artifacts" | "cache", b[3]!);
+  if (p === "/v1/release-merge") return handleReleaseMerge(req, env);
   if (p.startsWith("/v1/admin/")) return handleAdmin(req, env, p);
+  // 管理アプリの接続コードの引き換え（認証なし。コード自体が資格）
+  if (p === "/v1/console/redeem" && m === "POST") return handleConsoleRedeem(req, env);
   if (p.startsWith("/v1/devices/") || p.startsWith("/v1/artifacts/")) {
     const r = await handleDevices(req, env, p, origin);
     if (r) return r;

@@ -1,0 +1,86 @@
+# Upbeater アプリ（iPhone 版）を署名して組み立て、TestFlight へ送る。手動実行の時だけ動かす。
+# - 事前に App Store Connect でアプリ（バンドルID com.upbeater.upbeater）の枠を作っておく（API では作れない）
+# - 署名と送信には App Store Connect API のパスを使う。.p8 ファイルはこの Mac の ~/.appstoreconnect/private_keys/ にだけ置き、リポジトリには入れない
+# - 版番号（ビルド番号）は Upbeater の実行番号（リポジトリの中で必ず増える）。app-android.yml と同じ
+# - 端末に埋め込む公開鍵は、組み立てのたびに Hub の GET /v1/keys から取る（app-android.yml と同じ）
+# - 送り先のグループ（テスター）は App Store Connect 側の設定に従う。0 人のグループへは送らない
+
+name: testflight
+on:
+  manual: {}
+env:
+  FLUTTER_VERSION: 3.47.7
+  HUB: https://upbeater.loverhetoric.com
+jobs:
+  iphone:
+    name: 組み立てて TestFlight へ送る
+    runs-on: macos
+    timeout: 60
+    concurrency:
+      group: upbeater-app-testflight
+      cancel-in-progress: false
+    steps:
+      - uses: checkout
+      - uses: setup-flutter
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+      - run: flutter pub get
+        working-directory: app
+      - run: flutter analyze
+        working-directory: app
+      - run: flutter test
+        working-directory: app
+
+      - name: Upbeater の公開鍵
+        run: |
+          set -euo pipefail
+          KEYS="$(curl -fsS --max-time 20 "$HUB/v1/keys")" || { echo "Hub の公開鍵を取れません（Hub の署名鍵が未設定なら .upbeater/hub-signing-key.yml を先に実行）"; exit 1; }
+          PUB="$(printf '%s' "$KEYS" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps({str(k["gen"]): k["jwk"]["x"] for k in d["keys"] if k["status"] != "revoked"}, separators=(",",":")))')"
+          REV="$(printf '%s' "$KEYS" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(",".join(str(k["gen"]) for k in d["keys"] if k["status"] == "revoked"))')"
+          [ "$PUB" != "{}" ] || { echo "使える公開鍵がありません"; exit 1; }
+          echo "HUB_PUBLIC_KEYS=$PUB" >> "$GITHUB_ENV"
+          echo "HUB_REVOKED_GENERATIONS=$REV" >> "$GITHUB_ENV"
+          echo "埋め込む公開鍵の世代：$(printf '%s' "$PUB" | python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)))')"
+
+      - name: 署名して組み立て、TestFlight へ送る
+        working-directory: app
+        run: |
+          set -euo pipefail
+          KEY_ID=TGT37VBUY9
+          ISSUER_ID=bd737835-c327-48a7-a397-8e8993d4f593
+          TEAM=8NQ4F22H32
+          KEY_PATH="$HOME/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8"
+          [ -f "$KEY_PATH" ] || { echo "App Store Connect API の .p8 ファイルがこの Mac にありません：$KEY_PATH"; exit 1; }
+          AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEY_PATH" -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID")
+          echo "ビルド番号：$GITHUB_RUN_NUMBER"
+          flutter build ios --release --config-only --build-number="$GITHUB_RUN_NUMBER" \
+            --dart-define=UPBEATER_PUBLIC_KEYS="$HUB_PUBLIC_KEYS" \
+            --dart-define=UPBEATER_REVOKED_GENERATIONS="$HUB_REVOKED_GENERATIONS"
+          OUT="$PWD/build/testflight"
+          rm -rf "$OUT" && mkdir -p "$OUT"
+          cat > "$OUT/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$TEAM</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict>
+          </plist>
+          PLIST
+          cd ios
+          ok=0
+          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release \
+            -destination generic/platform=iOS -derivedDataPath "$OUT/dd" -archivePath "$OUT/Runner.xcarchive" \
+            DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic "${AUTH[@]}" archive > "$OUT/archive.log" 2>&1 || ok=$?
+          grep -E "error:|ARCHIVE (SUCCEEDED|FAILED)" "$OUT/archive.log" | sort -u | head -n 60 || true
+          [ $ok -eq 0 ] || exit $ok
+          xcodebuild -exportArchive -archivePath "$OUT/Runner.xcarchive" \
+            -exportOptionsPlist "$OUT/ExportOptions.plist" -exportPath "$OUT/export" \
+            "${AUTH[@]}" > "$OUT/export.log" 2>&1 || ok=$?
+          grep -E "error:|Upload succeeded|EXPORT (SUCCEEDED|FAILED)" "$OUT/export.log" | sort -u | head -n 60 || true
+          [ $ok -eq 0 ] || exit $ok
+          echo "TestFlight へ送りました（ビルド番号 $GITHUB_RUN_NUMBER）。Apple 側の処理に十数分かかります"

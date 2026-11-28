@@ -1,8 +1,10 @@
 /**
  * Cron（5 分ごと）：定期実行・心拍の途絶と時間超過の検知・結果表示の再試行・Runner 不在の通知（Webhook の取りこぼしの照合は RECONCILE_GITHUB="1" のときだけ）
  */
+import { sweepAutoMerges } from "./automerge";
 import { dispatchCloudRunners } from "./cloud";
 import { flushChecks } from "./checks";
+import { runHubOut } from "./hubout";
 import { coordinatorCall } from "./coordinator";
 import type { Env, JobRow, JobSpec, RepoRow } from "./env";
 import { createGitHubClient, parseRepo, type GitHubClient } from "./github";
@@ -159,11 +161,15 @@ export async function runCron(env: Env, now = Date.now()): Promise<void> {
     ["schedules", () => runSchedules(env, now)],
     ["sweep", () => sweepJobs(env, now)],
     ["notice", () => noticeWaitingJobs(env, now)],
+    // 自動マージの予約（DB の検査結果がそろったものだけ GitHub を読む。定期の問い合わせはしない）
+    ["auto-merge", () => sweepAutoMerges(env, createGitHubClient(env), now)],
     // 取りこぼしの照合は GitHub を 10 分ごとに読むので、既定では動かさない（RECONCILE_GITHUB="1" のときだけ）。
     // 2026-11 に GitHub への定期アクセスでアカウントが止められたため。取りこぼしは手動の実行（run_workflow）で補う
     ["reconcile", () => (env.RECONCILE_GITHUB === "1" ? reconcile(env, { now }) : Promise.resolve(0))],
     ["cloud", () => (env.HUB_URL ? dispatchCloudRunners(env, env.HUB_URL, now) : Promise.resolve(0))],
     ["checks", () => flushChecks(env, { now })],
+    // 失敗した実行を LOVE connect HUB（WORLD ruler.）へ知らせる（鍵と送り先がそろっている時だけ。hubout.ts）
+    ["hub-out", () => runHubOut(env, now)],
     [
       "cleanup",
       () =>

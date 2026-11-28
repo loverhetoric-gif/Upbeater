@@ -118,6 +118,8 @@ export interface GitHubClient {
   mergePull(repo: RepoRef, n: number, p: { sha: string; method: "merge" | "squash" | "rebase" }): Promise<MergeResult>;
   listPullFiles(repo: RepoRef, n: number): Promise<string[]>;
   compareFiles(repo: RepoRef, base: string, head: string): Promise<string[]>;
+  /** base から見た head の位置（ahead＝head のほうが新しい／behind＝head のほうが古い／identical／diverged＝枝分かれ） */
+  compareStatus(repo: RepoRef, base: string, head: string): Promise<"ahead" | "behind" | "identical" | "diverged">;
   getChecks(repo: RepoRef, sha: string): Promise<CheckState[]>;
   /** コミットを含む PR の番号 */
   listCommitPulls(repo: RepoRef, sha: string): Promise<number[]>;
@@ -310,6 +312,12 @@ export class HttpGitHubClient implements GitHubClient {
   async listPullFiles(repo: RepoRef, n: number): Promise<string[]> {
     const res = await this.request(repo, `${this.base(repo)}/pulls/${n}/files?per_page=100`);
     return ((await res.json()) as { filename?: string }[]).map((f) => f.filename ?? "").filter(Boolean);
+  }
+
+  async compareStatus(repo: RepoRef, base: string, head: string): Promise<"ahead" | "behind" | "identical" | "diverged"> {
+    const res = await this.request(repo, `${this.base(repo)}/compare/${enc(base)}...${enc(head)}?per_page=1`);
+    const s = ((await res.json()) as { status?: string }).status;
+    return s === "ahead" || s === "behind" || s === "identical" ? s : "diverged";
   }
 
   async compareFiles(repo: RepoRef, base: string, head: string): Promise<string[]> {

@@ -108,7 +108,7 @@ function prJson(repo, pr) {
     merged: pr.merged,
     mergeable,
     mergeable_state: state,
-    draft: false,
+    draft: !!pr.draft,
     head: { ref: pr.head, sha: head },
     base: { ref: pr.base, sha: base },
     html_url: `https://github.com/${repo}/pull/${pr.number}`,
@@ -170,6 +170,11 @@ function control(p, body) {
     case "/__mock/revoke-tokens": S.tokens.clear(); return json({ ok: true });
     case "/__mock/oauth-user": S.oauthCodes.set(body.code, { id: body.id, login: body.login }); return json({ ok: true });
     case "/__mock/pulls": return json(S.pulls.get(body.repo.toLowerCase()) ?? []);
+    case "/__mock/draft": {
+      const x = (S.pulls.get(body.repo.toLowerCase()) ?? []).find((p) => p.number === body.number);
+      if (x) x.draft = body.draft;
+      return json({ ok: true });
+    }
     case "/__mock/protect": S.protect.set(body.repo.toLowerCase(), body); return json({ ok: true });
     case "/__mock/unknown-mergeable": S.unknownMergeable = body.count; return json({ ok: true });
     case "/__mock/gcp-runs": return json(S.gcpRuns);
@@ -367,12 +372,13 @@ export default {
         return json({ sha, merged: true, message: "Pull Request successfully merged" });
       }
     }
-    if ((m = /^\/compare\/([^.]+)\.\.\.(.+)$/.exec(rest))) {
+    if ((m = /^\/compare\/([^.]+)\.\.\.([^?]+)(?:\?.*)?$/.exec(rest))) {
       const resolve = (x) => S.branches.get(bkey(repo, decodeURIComponent(x))) ?? decodeURIComponent(x);
       const a = resolve(m[1]);
       const b = resolve(m[2]);
       const mb = mergeBase(repo, a, b);
-      return json({ files: [...diff(mb ? treeOf(repo, mb) : {}, treeOf(repo, b)).keys()].map((filename) => ({ filename })) });
+      const status = a === b ? "identical" : mb === a ? "ahead" : mb === b ? "behind" : "diverged";
+      return json({ status, files: [...diff(mb ? treeOf(repo, mb) : {}, treeOf(repo, b)).keys()].map((filename) => ({ filename })) });
     }
     if ((m = /^\/commits\/([^/]+)\/check-runs$/.exec(rest))) {
       const prot = S.protect.get(repo) ?? {};

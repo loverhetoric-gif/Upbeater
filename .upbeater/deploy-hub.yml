@@ -1,0 +1,45 @@
+# Upbeater のハブ（hub/、Worker upbeater-hub）を個人用 Cloudflare に公開する。
+# main の hub/ が変わった時と、手動の実行で動く。D1 の migration を当ててから Worker を公開する。
+# 秘密情報・Worker の Secret（ADMIN_TOKEN など）には触れない（初回の用意は hub/scripts/deploy.mjs）。
+name: deploy-hub
+on:
+  manual: {}
+  push:
+    branches: [main]
+    paths:
+      - hub/**
+      - .upbeater/deploy-hub.yml
+env:
+  CLOUDFLARE_ACCOUNT_ID: f95f76412f29c64f24e18e16d58f48f6
+jobs:
+  deploy:
+    name: ハブを公開
+    runs-on: macos
+    timeout: 15
+    concurrency:
+      group: deploy-hub
+      cancel-in-progress: false
+    secrets:
+      - CLOUDFLARE_API_TOKEN
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: checkout
+      - run: npm ci --no-audit --no-fund
+        working-directory: hub
+      - name: 試験
+        run: npx tsc --noEmit && npx vitest run
+        working-directory: hub
+      - name: D1 の migration を当てる
+        run: |
+          [ -n "${CLOUDFLARE_API_TOKEN:-}" ] || { echo "CLOUDFLARE_API_TOKEN が登録されていません"; exit 1; }
+          npx wrangler d1 migrations apply upbeater --remote
+        working-directory: hub
+      - name: 公開
+        run: npx wrangler deploy
+        working-directory: hub
+      - name: 動いているか確かめる
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST https://upbeater.loverhetoric.com/v1/release-merge)
+          echo "release-merge の応答: $code（401 なら受け口あり）"
+          [ "$code" != "404" ]

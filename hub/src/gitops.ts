@@ -9,6 +9,8 @@
 import { sha256Hex } from "./crypto";
 import type { Env } from "./env";
 import { GitHubError, parseRepo, type GitHubClient, type PullRequest, type RepoRef, type TreeEntry } from "./github";
+import { evaluateAutoMerge, reserveAutoMerge, type MergeMethod } from "./automerge";
+import type { RepoRow } from "./env";
 import { recordOperation } from "./operations";
 
 export class OpError extends Error {
@@ -58,6 +60,8 @@ interface Stages {
   done(stage: string, patch: State): Promise<void>;
   /** いま実行中の段階（失敗の報告に使う） */
   stage: string;
+  /** この依頼の ID（自動マージの予約と結びつける） */
+  request_id: string;
 }
 
 /** 実行中とみなす時間。これを過ぎた running は中断とみなして再開できる */
@@ -127,6 +131,7 @@ async function runRequest(ctx: OpContext, tool: string, requestId: string | unde
   const stages: Stages = {
     state,
     stage: "start",
+    request_id: id,
     async done(stage, patch) {
       Object.assign(state, patch);
       await env.DB.prepare("UPDATE github_requests SET stage = ?, state = ?, updated_at = ? WHERE owner_id = ? AND request_id = ?").bind(stage, JSON.stringify(state), now(), owner_id, id).run();
@@ -205,6 +210,15 @@ async function assertAllowed(ctx: OpContext, repo: RepoRef): Promise<void> {
   if (!row) {
     throw new OpError("repo_not_allowed", `${repo.owner}/${repo.name} は Upbeater に登録されていません（register_repo で登録したリポジトリだけを操作できます）`, { needsHuman: true });
   }
+}
+
+/** 自動マージの予約は、持ち主がリポジトリで有効にしている時だけ受け付ける（AI は有効にできない） */
+async function assertAutoMergeEnabled(ctx: OpContext, repo: RepoRef): Promise<RepoRow> {
+  const row = await ctx.env.DB.prepare("SELECT * FROM repos WHERE owner_id = ? AND full_name = ?").bind(ctx.owner_id, `${repo.owner}/${repo.name}`).first<RepoRow>();
+  if (!row || row.auto_merge_enabled !== 1) {
+    throw new OpError("auto_merge_disabled", `${repo.owner}/${repo.name} は自動マージが有効ではありません。持ち主が有効にする必要があります（AI からは有効にできません）。予約はしていません`, { needsHuman: true });
+  }
+  return row;
 }
 
 /** 利用者の依頼で作ったコミット・PR を記録する（Upbeater 自身の書き込みでも合図にするため） */
@@ -360,6 +374,25 @@ async function stageMerge(ctx: OpContext, r: Stages, repo: RepoRef, n: number, m
   throw new OpError("mergeability_unknown", "GitHub がマージの可否を判定できませんでした", { retryable: true });
 }
 
+/** 自動マージを予約する（冪等）。予約したらすぐ 1 度評価する（検査が済んでいる PR はそのままマージされる） */
+async function stageAutoMerge(ctx: OpContext, r: Stages, repo: RepoRef, pr: PullRequest, method: MergeMethod | undefined): Promise<Record<string, unknown>> {
+  r.stage = "auto_merge";
+  const row = await assertAutoMergeEnabled(ctx, repo);
+  if (!r.state.auto_merge_reserved) {
+    const fresh = await ctx.gh.getPull(repo, pr.number);
+    await reserveAutoMerge(ctx.env, { owner_id: ctx.owner_id, repo: row, pr: fresh, method, request_id: r.request_id }, (ctx.now ?? Date.now)());
+    await r.done("auto_merge_reserved", { auto_merge_reserved: true });
+  }
+  let outcome = "reserved";
+  try {
+    outcome = await evaluateAutoMerge(ctx.env, ctx.gh, row.id, pr.number, (ctx.now ?? Date.now)());
+  } catch {
+    // 評価の失敗で予約は失わない（Webhook・Cron が続きを評価する）
+  }
+  const st = await ctx.env.DB.prepare("SELECT status, code, reason FROM auto_merges WHERE repo_id = ? AND pr_number = ?").bind(row.id, pr.number).first<{ status: string; code: string | null; reason: string | null }>();
+  return { reserved: true, method: method ?? row.auto_merge_method, status: st?.status ?? "waiting", ...(st?.reason ? { reason: st.reason } : {}), outcome, note: "検査が通ったら Upbeater がマージします。状況は get_request・list_operations（kind: auto_merge）で確かめられます" };
+}
+
 // ───────── 公開する操作 ─────────
 
 export async function createBranchOp(ctx: OpContext, a: { repo: string; branch: string; from?: string; request_id?: string }): Promise<OpResult> {
@@ -384,14 +417,21 @@ export async function commitFilesOp(ctx: OpContext, a: { repo: string; branch: s
   });
 }
 
-export async function openPrOp(ctx: OpContext, a: { repo: string; head: string; base?: string; title: string; body?: string; request_id?: string }): Promise<OpResult> {
-  return runRequest(ctx, "open_pr", a.request_id, { repo: a.repo.toLowerCase(), head: a.head, base: a.base, title: a.title, body: a.body }, async (r) => {
+export async function openPrOp(
+  ctx: OpContext,
+  a: { repo: string; head: string; base?: string; title: string; body?: string; auto_merge?: boolean; method?: MergeMethod; request_id?: string },
+): Promise<OpResult> {
+  // auto_merge を指定しない依頼は、これまでと同じ内容として扱う（既存の依頼 ID の照合を変えない）
+  return runRequest(ctx, "open_pr", a.request_id, { repo: a.repo.toLowerCase(), head: a.head, base: a.base, title: a.title, body: a.body, ...(a.auto_merge ? { auto_merge: true, method: a.method } : {}) }, async (r) => {
     const repo = checkRepoName(a.repo);
     checkBranchName(a.head);
     if (a.base) checkBranchName(a.base);
     await assertAllowed(ctx, repo);
+    if (a.auto_merge) await assertAutoMergeEnabled(ctx, repo);
     const pr = await stagePull(ctx, r, repo, a.head, a.base, a.title, a.body ?? "");
-    return { number: pr.number, url: pr.html_url, base: r.state.base_branch };
+    const out: Record<string, unknown> = { number: pr.number, url: pr.html_url, base: r.state.base_branch };
+    if (a.auto_merge) out.auto_merge = await stageAutoMerge(ctx, r, repo, pr, a.method);
+    return out;
   });
 }
 
@@ -414,6 +454,8 @@ export interface ShipInput {
   files: FileChange[];
   merge?: boolean;
   method?: "merge" | "squash" | "rebase";
+  /** true なら即時にマージせず、検査が通ったら Upbeater がマージするよう予約する（リポジトリの自動マージが有効な時だけ） */
+  auto_merge?: boolean;
   request_id?: string;
 }
 
@@ -425,12 +467,17 @@ export async function shipChangeOp(ctx: OpContext, a: ShipInput, tool = "ship_ch
     checkBranchName(a.branch);
     if (a.base) checkBranchName(a.base);
     checkFiles(a.files);
+    if (a.auto_merge && a.merge === true) throw new OpError("invalid_input", "auto_merge と merge: true は同時に指定できません（auto_merge は即時にマージせず予約します）");
     await assertAllowed(ctx, repo);
+    if (a.auto_merge) await assertAutoMergeEnabled(ctx, repo);
     await stageBranch(ctx, r, repo, a.branch, a.base);
     await stageCommit(ctx, r, repo, a.branch, a.message ?? a.title, a.files);
     const pr = await stagePull(ctx, r, repo, a.branch, a.base, a.title, a.body ?? "");
     const out: Record<string, unknown> = { branch: a.branch, commit_sha: r.state.commit_sha, pr_number: pr.number, pr_url: pr.html_url };
-    if (a.merge !== false) {
+    if (a.auto_merge) {
+      out.auto_merge = await stageAutoMerge(ctx, r, repo, pr, a.method);
+      out.merged = false;
+    } else if (a.merge !== false) {
       out.merge_commit_sha = await stageMerge(ctx, r, repo, pr.number, a.method ?? "squash");
       out.merged = true;
     }

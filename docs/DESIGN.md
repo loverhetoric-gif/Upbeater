@@ -94,6 +94,27 @@ jobs:
 - 安全装置（`dist_settings`）：OS ごとの一時停止・巻き戻し（指定の版に固定し、署名つきの巻き戻しの指示を出す）・段階配信（先行する 1 台が入れ終えてから残り全台）。同じ版が 2 台以上で失敗したら、その版を止め（halted）、人の判断が要るものとして記録する
 - MCP：`get_install_status`・`push_update`・`rollback`・`set_distribution`・`list_devices`・`create_device_code`
 
+### 配布先の端末の指定（`dist_targets`）
+
+- リポジトリ × OS ごとに、配る端末を指定できる。**1 行でもあれば、その端末だけに配る。行が無ければ、その OS の登録端末すべて**（従来どおり）。OS ごとに独立で、別の OS の配布には影響しない
+- 設定：MCP `set_distribution` の `devices`（端末名か端末の ID の配列）。`[]` で解除、省くと今のまま。置き換えは `DB.batch` で一括（1 台でも誤りがあれば何も変えない）。`operations` に `kind=release`・`stage=targets` で残す
+- 端末の探し方：呼び出した利用者（`owner_id`）の端末の中だけから、名前（または ID）で探す。他の利用者の端末は「登録されていません」（あるかどうかも知らせない）。次は日本語の誤りで断る：無い（`device_not_found`）・OS が違う（`device_os_mismatch`「端末「X」は ios の端末です。android の配布先には指定できません」）・名前が複数ある（`device_name_ambiguous`。`list_devices` の ID で指定する）・先行する端末が配布先の外（`canary_not_in_targets`）
+- 端末への効き方（配布先でない端末にも `200` を返す）：
+  - `GET /v1/devices/apps`：配布先でない端末には、そのリポジトリを出さない
+  - `POST /v1/devices/check`：配布先でない端末には `{ update: false, latest_seq: <端末の現在の版>, targeted: false }`。版の有無も、巻き戻しの指示も知らせない。一時停止・巻き戻し・段階配信は、配布先の端末にだけ働く
+  - 段階配信：先行する端末は配布先の中から選ぶ。指定が無い（または配布先の外になった）ときは、**配布先の中で最初に登録した端末**
+  - 失敗で止める台数（`HALT_AFTER_FAILURES` = 2）：配布先の端末の失敗だけを数える。配布先が 2 台未満のときは配布先の台数で止める（1 台だけの配布先なら、その 1 台の失敗で止まる）。配布先でない端末の報告は `installs` に記録するが、数えない
+  - 配布先の端末が削除されて実在しなくなったときも、指定は残る。実在する配布先が 0 台なら誰にも配らない（全台には戻さない）。戻すには `devices: []`
+  - `get_install_status`：`targets`（OS ごとの配布先の端末名と ID。指定が無い OS は出ない）と、端末ごとの `targeted`（いま配られる端末か）を出す
+- 端末の識別・登録は LOVE connect HUB 規格（第21章）の言葉に合わせる。端末の登録は「使い捨ての登録コード（規格の合言葉）」で行い、**端末の鍵**（ECDSA P-256 の公開鍵。非圧縮 65 バイトの base64url）を `POST /v1/devices/register` の `pub`・`sig` で**任意**に添えられる。添えたら、規格の登録の文面（`lch-pair-v1`・会社 ID＝持ち主・送り手 ID＝端末名・`device`・公開鍵・登録コード（正規化）の SHA-256）への署名を、取り込んだ本体の `verifyDeviceSignature`・`pairingMessage` で確かめ、合わなければ `PAIR_BAD_PROOF`（401）で断る（コードは使われない）。`devices.pub` に保存し、`list_devices` には指紋（SHA-256 の先頭 16 字）だけを出す。添えない端末は今までどおり登録できる（端末トークンによる認証は変えない）
+- 規格の「送るたびの証明（`lch-device` 見出し）」「ログインのトークン」「承認の証明」は取り込んでいるが、Hub の端末 API では使わない。既存の端末アプリ（端末トークンだけで照合する）を壊さないため
+
+## LOVE connect HUB の取り込み
+
+- 本体（loverhetoric-gif/love-connect-hub の `src/`）を `tools/build-love-connect-hub.sh` で 1 つの `.mjs` にまとめ、`hub/src/vendor/love-connect-hub.mjs` に置く（自動生成・手で編集しない。1 行目に版とコミット）。外部の部品は無く、標準機能（Web Crypto）だけなので Workers で動く。N.S Connection と同じ方式
+- 取り込み方は `.lch/vendor.json`（`file`・`build`・`test`）。Rhetoric Studio の版上げ（`lch-rollout`）が、本体の更新のたびに組み立て直して PR を作る（マージ・公開は人が行う）。Upbeater 自身には、本体を調べる定期処理は置かない
+- 使っている部品：`verifyDeviceSignature`・`pairingMessage`（端末の鍵）。そのほかは取り込むだけ（Hub は封筒・レーンを使わない）
+
 ## 接続口：MCP コネクタ
 
 Hub に MCP サーバー（`/mcp`）を持たせ、claude.ai のコネクタとして接続する。Claude が会話から、いつでも実行・配信できる。
@@ -103,7 +124,7 @@ Hub に MCP サーバー（`/mcp`）を持たせ、claude.ai のコネクタと�
 - 移行：`migrate_workflows`（Actions の定義を変換して PR を作る）
 - 配布：`push_update`・`rollback`・`get_install_status`
 - 秘密情報：`list_secrets`（名前のみ）
-- GitHub 操作：`create_branch`・`commit_files`・`open_pr`・`merge_pr`
+- GitHub 操作：`create_branch`・`commit_files`・`open_pr`・`merge_pr`・`cancel_auto_merge`・`set_auto_merge`（無効にするだけ）
 
 ### MCP の実装（開発順序4）
 
@@ -111,9 +132,27 @@ Hub に MCP サーバー（`/mcp`）を持たせ、claude.ai のコネクタと�
 - 道具：`list_repos`・`register_repo`・`pause`（合図での実行を止める。手動実行は止めない。再開後は照合で最新に追いつく）・`run_workflow`・`list_runs`・`get_run`・`get_logs`・`rerun`・`cancel`・`list_runners`・`list_operations`・`migrate_workflows`（変換して PR。マージはしない）・`list_secrets`・`request_secrets`（入力ページの URL を発行。値はチャットに出さない）・`create_branch`・`commit_files`・`open_pr`・`merge_pr`・`ship_change`・`get_request`。配布の道具は開発順序6
 - 自分のコミット：MCP で依頼したコミット・PR は `requested_refs` に記録し、Upbeater 自身の書き込みでも合図にする（マージの push は、コミットに対応する PR でも確かめる）。それ以外の自分の push は合図にせず、既定ブランチなら処理済み（`last_seen_sha`）にして、定期照合が取りこぼしとして拾わないようにする
 
+### 承認後のマージの受け口と削除の手段
+
+- `POST /v1/release-merge`：外部の承認の仕組み（WORLD ruler. の release）が、利用者の承認の後にマージを依頼する受け口。認証は `/mcp` と同じ（接続用トークン `upb_m_`、または OAuth の `upb_at_`）。本体は `{repo, number, request_id}`（`request_id` は必須）。登録済みのリポジトリだけを、`mergePrOp` に `request_id` を付けて実行する。同じ `request_id` の再依頼は、完了済みなら完了済みの結果を返す（二重にマージしない）。同じ `request_id` で別の内容は拒否する。答えは `{ok:true, merged:true, note?}` か `{ok:false, merged:false, reason, code, retryable, needs_human}`（`reason` は日本語。値・トークンは出さない）。認証の失敗は 401、入力の誤りは 400、マージの失敗は 200 で `ok:false`
+- `delete_secret`（`repo` 省略で全リポジトリ共通・`name`）：秘密情報を 1 つ消す。値は返さない
+- `unregister_repo`（`repo`）：登録を外し、そのリポジトリの秘密情報・入力ページ・定義の写し・配布の設定も消す。実行の履歴・配布の記録が残っているリポジトリは消さず `repo_has_history` を返す（履歴の削除は別の手段）。GitHub 側には何もしない
+- 2 つの削除の道具は取り消せない。利用者の承認（WORLD ruler. の destructive）の後にだけ使い、道具の説明にもそう書く。どちらも `operations` に記録を残す（秘密情報の値は記録しない）
+
 ## GitHub 操作の内製化
 
 claude.ai の GitHub コネクタでは、PR 作成時の確認画面が読み込めず作業が止まる事象が起きた。Upbeater は自前の GitHub App で、ブランチ作成 → コミット → PR → マージを一続きで実行する。失敗しても止まらず、段階・理由・再試行の可否を返す。操作できるリポジトリは Hub に登録したものに限定し、main への直接書き込みは禁止する。
+
+## 検査通過後の自動マージ
+
+AI のセッションが `merge_pr` を呼ぶと、利用者側の自動の安全判定で止められる。利用者の設定（許可リスト）を変えさせる作りは採らない。代わりに「マージを AI が行う」のをやめ、「持ち主が事前に有効にした規則に従って、Upbeater 自身がマージする」（GitHub の auto-merge と同じ考え方）。
+
+- **設定（リポジトリごと）**：`repos.auto_merge_enabled`（既定 0）と `auto_merge_method`（既定 squash）。**有効にできるのは持ち主だけ**：管理 API `PUT /v1/admin/auto-merge`（`ADMIN_TOKEN` が要る。AI は持たない）。MCP の `set_auto_merge` は**無効にする**ことだけができる（安全な向き）。`list_repos` で状態が見える
+- **予約**：`open_pr`・`ship_change` の `auto_merge: true`（`ship_change` では即時のマージの代わりに予約する）。設定が無効なら予約の時点で `auto_merge_disabled`（needs_human）で断る。予約は `auto_merges`（リポジトリ × PR 番号で 1 件）に残る。状態は waiting（待機）・merging（マージ中）・merged・cancelled・closed・stopped（人の判断待ち）
+- **マージの条件**（すべて満たした時だけ）：設定が有効／PR が下書きでない／予約したコミット（head）に対する Upbeater の run（`runs.sha`・種類を問わない）が 1 件以上あり、すべて完了して success（`definition_error`・cancelled は失敗。run が 10 分たっても 1 件も無ければ needs_human）／衝突が無い（behind・dirty は main を 1 回取り込む。取り込みで head が変わるので**新しい head の検査を待ち直す**。取り込めない衝突は stopped にして needs_human で残す）／ブランチ保護・必須の検査を満たす。マージには**検査済みの SHA** を渡す（検査していないコミットをマージしない）
+- **起きた時に評価する（定期の問い合わせはしない）**：run の完了（`flushChecks` の後）／Webhook の pull_request（synchronize＝新しい head：検査を待ち直す、closed＝取り消し・マージ済みの記録、ready_for_review）／Cron（5 分ごと。DB の run がすべて成功している予約だけ GitHub を読む。判定待ち・保留中の検査は間隔を広げ、12 回で stopped にして needs_human）。7 日たった予約は期限切れで閉じる
+- **失敗・取り消し**：検査が失敗なら予約は残して理由を needs_human で 1 度だけ記録し、再実行の成功か新しいコミットで評価し直す。PR が閉じられたら closed。取り消しは `cancel_auto_merge`。二重のマージは、waiting → merging の条件つき更新で防ぐ
+- **記録**：すべての段階を operations の kind `auto_merge`（reserved・waiting・head_changed・merged・stopped・cancelled・closed）に残し、`get_request` に予約の現在の状態と履歴を出す。既存の `merge_pr`・`open_pr`・`ship_change` の動作は、`auto_merge` を指定しない限り変えない
 
 ## 構成
 
@@ -163,6 +202,14 @@ Upbeater 自身の検査・公開も Upbeater で行い、Actions は使わな�
 - 部品：`actions/checkout`・`setup-node`・`setup-java`・`setup-go`・`setup-python`・`subosito/flutter-action`（→ `setup-flutter`）・`cache`・`upload-artifact`・`download-artifact`（name を省いたものは、依存先が保存した成果物ごとに分けて取り出す）。そのほかの部品は「変換できません」
 - Actions の台本との互換（Runner）：環境変数 `CI`・`GITHUB_SHA`・`GITHUB_REF`・`GITHUB_REF_NAME`・`GITHUB_EVENT_NAME`（Actions の名前。manual は `workflow_dispatch`）・`GITHUB_REPOSITORY`・`GITHUB_ACTOR`・`GITHUB_RUN_NUMBER`、手順ごとのファイル `GITHUB_OUTPUT`（→ 後の手順の式で `steps.<id>.outputs.<名前>`）・`GITHUB_ENV`（後の手順の環境変数）・`GITHUB_PATH`・`GITHUB_STEP_SUMMARY`（ログに写す）。手順の `id` と `steps.<id>.outcome` を使える。ジョブの env の `${{ secrets.X }}` などは Runner が値にする。成果物は Actions と同じく、指定したものに共通する一番近いフォルダを起点にまとめる（`path: app/build/x.apk` なら、取り出すと `<取り出し先>/x.apk`）
 - concurrency の group には `${{ matrix.x }}` のほか、`${{ ref }}`・`${{ branch }}`・`${{ event }}` を書ける（Hub が実行の値に置き換える）
+
+## 失敗の知らせ（LOVE connect HUB。hub/src/hubout.ts）
+
+- 通知サービスを持たない（上記）ため、実行が失敗しても利用者の iPhone には届かない。失敗の知らせを、LOVE connect HUB の event レーンの封筒 `event.upbeater.run.failed` で WORLD ruler. へ送り、WORLD ruler. が iPhone の通知（種類「エラー」）にする（WORLD ruler. 設計書 9.3、LOVE connect HUB 規格書 第19章）
+- 失敗した実行（`conclusion` が `failure`・`definition_error`）を Cron（5 分ごと）で拾い、封筒を作って署名し、`hub_outbox` に預ける。送り損ねたら同じ封筒のまま間隔を広げて送り直す（上限あり）。届いた（200・DUPLICATE）・通らない（4xx）・諦めた、を記録に残す
+- 本文は `{repo, workflow, run, reason, at}` だけ。ログの本文は入れない。署名は会社ごとの鍵（Worker の秘密情報 `HUB_KEY_LOVERHETORIC`。HMAC-SHA256）。送り先は `HUB_WORLDRULERS_URL`。**鍵か送り先が空の間は何もしない**
+- 見張り（例：ChottoMatte の `collector-watch`）の止まりは、見張りの実行が失敗する形で、同じ封筒に乗る
+- 最初の 1 回は読み進める位置を決めるだけで、過去の失敗は送らない。Cron の式・`RECONCILE_GITHUB` は変えない
 
 ## 移行計画
 
